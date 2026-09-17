@@ -14,7 +14,7 @@
  
 ## About the Project
   
-Code & Conquer, heavily inspired by Reeborg's World, is an educational programming game in which players write real code (C++ or Python) to control a character navigating an isometric world. Catering towards older high school and college aged beginners, the platform exposes users to features common in desktop IDEs. Our goal is to foster creative problem solving by providing a fun and engaging way to learn programming fundamentals.
+Code & Conquer, heavily inspired by Reeborg's World, is an educational programming game in which players write real code (C++ or Python) to control a character navigating an isometric world. Catering towards older high school and college-aged beginners, the platform exposes users to features common in desktop IDEs. Our goal is to foster creative problem-solving by providing a fun and engaging way to learn programming fundamentals.
  
 **Key features:**
 - Built-in code editor with syntax highlighting, execution cursor, and step-by-step debug mode (C++ and Python)
