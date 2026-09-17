@@ -71,7 +71,7 @@ To get a local copy of the project, clone the repository using your terminal or 
 2. Navigate to the directory where you want to store the project.
 3. Run the following command:
 ```bash
-git clone https://github.com/MakariousS44/Code-and-Conquer.git
+git clone https://github.com/Yoshibar-003/Code-and-Conquer.git
 ```
  
 Once the download is complete, a new folder named after the project will be created.
