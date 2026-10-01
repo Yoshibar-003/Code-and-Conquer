@@ -95,9 +95,10 @@ func _on_button_start_pressed() -> void:
 	$TabMoveSound.play()
 
 	# refreshes the dropdown in case new levels were added since the menu loaded the first time
+	# refreshes the campaign levels before showing popup
 	# users can drag and drop to the file outside of the game so this is important
-	if level_dropdown != null and level_dropdown.has_method("populate_from_folder"):
-		level_dropdown.populate_from_folder(CUSTOM_LEVELS_DIR)
+	if level_dropdown != null and level_dropdown.has_method("populate_levels"):
+		level_dropdown.populate_levels()
 
 	if level_popup != null:
 		level_popup.popup_centered()
@@ -151,9 +152,9 @@ func _on_level_file_selected(path: String) -> void:
 
 	dest_file.store_string(contents)
 	dest_file.close()
-
-	if level_dropdown != null and level_dropdown.has_method("populate_from_folder"):
-		level_dropdown.populate_from_folder(CUSTOM_LEVELS_DIR)
+	#refresh the level list after a custom level is uploaded
+	if level_dropdown != null and level_dropdown.has_method("populate_levels"):
+		level_dropdown.populate_levels()
 
 	if level_dropdown != null and level_dropdown.has_method("select_path"):
 		level_dropdown.select_path(dest_path)
