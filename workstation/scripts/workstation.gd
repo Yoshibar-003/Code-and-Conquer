@@ -114,6 +114,25 @@ var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move
 var _run_had_error: bool = false  # set when the subprocess emits [ERROR]
 const MOVE_LIMIT := 999
 const CMD_LIMIT := 9999
+const PROGRAM_TIMEOUT_SECONDS := 10.0
+const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
+const ALLOWED_IPC_QUERIES := [
+	"FRONT_IS_CLEAR", 
+	"RIGHT_IS_CLEAR", 
+	"LEFT_IS_CLEAR",
+	"WALL_IN_FRONT", 
+	"WALL_ON_RIGHT", 
+	"WALL_ON_LEFT",
+	"AT_GOAL", 
+	"OBJECT_HERE", 
+	"CARRIES_OBJECT",
+	"IS_FACING_NORTH", 
+	"IS_FACING_EAST", 
+	"IS_FACING_WEST",
+]
+const MAX_STUDENT_OUTPUT_LINES := 200
+const MAX_STUDENT_SOURCE_CHARS := 100000
+var _student_output_lines := 0
 
 func _ready() -> void:
 	# Kill any subprocess left over from a previous session that was force-closed.
@@ -769,11 +788,27 @@ func _stop_execution() -> void:
 	# If IPC loop is paused waiting for a step, unblock it so it can exit cleanly
 	_resume.emit()
 
+func _enforce_program_timeout(pid: int) -> void:
+	await get_tree().create_timer(PROGRAM_TIMEOUT_SECONDS).timeout
+
+	if _ipc_active and _subprocess_pid == pid:
+		log_error("Program stopped: it ran longer than %d seconds." % PROGRAM_TIMEOUT_SECONDS)
+		_set_status("Timed out", "error")
+		_stop_execution()
+		_re_enable_buttons()
 
 func _run_pipeline() -> void:
 	# Capture caller's intent BEFORE _stop_execution wipes _paused.
 	var start_paused: bool = _paused
 	_stop_execution()
+	_student_output_lines = 0
+
+	if editor.text.length() > MAX_STUDENT_SOURCE_CHARS:
+		log_error("Source code is too large. Maximum size is 100,000 characters.")
+		_set_status("Validation failed", "error")
+		_re_enable_buttons()
+		return
+
 	reset_button.disabled = false
 	run_button.disabled = true
 	step_button.disabled = true
@@ -811,7 +846,10 @@ func _run_pipeline() -> void:
 	# start IPC server
 	var IPCServer = preload(Paths.IPC_SERVER)
 	_ipc_server = IPCServer.new()
-	if not _ipc_server.start():
+	var crypto := Crypto.new()
+	var ipc_token := crypto.generate_random_bytes(32).hex_encode()
+
+	if not _ipc_server.start(ipc_token):
 		log_error("Could not open a local TCP port for IPC. Is the port range 27015-27115 blocked?")
 		_set_status("IPC failed", "error")
 		_re_enable_buttons()
@@ -821,7 +859,7 @@ func _run_pipeline() -> void:
 	if current_language == Language.CPP:
 		var generated: Dictionary = generator.generate(editor.text)
 		current_line_offset = generated.line_offset
-		compiler.prepare_build_files(generated.generated_source, _ipc_server.port)
+		compiler.prepare_build_files(generated.generated_source, _ipc_server.port, ipc_token)
 
 		var build: Dictionary = compiler.compile_program()
 		if not build.ok:
@@ -835,7 +873,7 @@ func _run_pipeline() -> void:
 		_subprocess_pid = compiler.start_program()
 	else:
 		current_line_offset = 0
-		_subprocess_pid = py_pipeline.start(editor.text, _ipc_server.port)
+		_subprocess_pid = py_pipeline.start(editor.text, _ipc_server.port, ipc_token)
 
 	if _subprocess_pid == -1:
 		log_error("Failed to launch subprocess.")
@@ -844,6 +882,8 @@ func _run_pipeline() -> void:
 		_ipc_server = null
 		_re_enable_buttons()
 		return
+
+	_enforce_program_timeout(_subprocess_pid)
 
 	_set_status("Running...", "")
 	if not await _ipc_server.wait_for_connection(get_tree()):
@@ -876,6 +916,13 @@ func _run_ipc_loop() -> void:
 		if line == "[CANCELLED]" or line == "[DISCONNECT]":
 			break
 
+		if line == "[AUTH_FAILED]" or line == "[PROTOCOL_ERROR]":
+			log_error("Security error: student program failed IPC authentication.")
+			_run_had_error = true
+			_set_status("Security error", "error")
+			_stop_execution()
+			_re_enable_buttons()
+			return
 		if line.begins_with("[CMD]"):
 			var cmd := line.trim_prefix("[CMD] ")
 			var src_line := -1
@@ -883,6 +930,14 @@ func _run_ipc_loop() -> void:
 				var parts := cmd.split(" [LINE] ")
 				cmd = parts[0].strip_edges()
 				src_line = int(parts[1].strip_edges())
+
+			if not ALLOWED_IPC_COMMANDS.has(cmd):
+				log_error("Security error: unrecognized robot command.")
+				_run_had_error = true
+				_set_status("Security error", "error")
+				_stop_execution()
+				_re_enable_buttons()
+				return 
 
 			if _cmd_history.size() >= CMD_LIMIT:
 				_trigger_move_limit_lose()
@@ -911,11 +966,25 @@ func _run_ipc_loop() -> void:
 			var query := line.trim_prefix("[QUERY] ")
 			if " [LINE] " in query:
 				query = query.split(" [LINE] ")[0].strip_edges()
+
+			if not ALLOWED_IPC_QUERIES.has(query):
+				log_error("Security error: unrecognized robot query.")
+				_run_had_error = true
+				_set_status("Security error", "error")
+				_stop_execution()
+				_re_enable_buttons()
+				return 
+	
 			var answer := _answer_query(query)
 			_ipc_server.send(answer)
 
 		elif line.begins_with("[PRINT]"):
-			log_line(line.trim_prefix("[PRINT] "))
+			if _student_output_lines < MAX_STUDENT_OUTPUT_LINES:
+				log_line(line.trim_prefix("[PRINT] "))
+			elif _student_output_lines == MAX_STUDENT_OUTPUT_LINES:
+				log_warning("Output limit reached; further student output is hidden.")
+
+			_student_output_lines += 1
 
 		elif line.begins_with("[ERROR]"):
 			log_error(line.trim_prefix("[ERROR] "))
