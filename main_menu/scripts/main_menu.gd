@@ -11,6 +11,7 @@
 extends Control
 
 const CUSTOM_LEVELS_DIR := "user://custom_levels/"
+var campaign_menu: Window
 
 # we used get_node_or_null() directly here instead of going through get_tree().current_scene
 # on Linux, current_scene can be null when these vars get initialized direct paths are fine 
@@ -83,6 +84,13 @@ func _ready() -> void:
 		level_dropdown.item_selected.connect(func(_i: int): _update_play_button())
 
 	_update_play_button()
+	campaign_menu = preload("res://main_menu/scripts/campaign_menu.gd").new()
+	campaign_menu.visible = false
+	add_child(campaign_menu)
+	campaign_menu.level_selected.connect(func(path: String):
+		SelectedLevel.path = path
+		_on_play_button_pressed())
+	campaign_menu.custom_worlds_requested.connect(_open_custom_worlds)
 
 
 # keeps the play button greyed out until the user has actually picked a level
@@ -93,12 +101,17 @@ func _update_play_button() -> void:
 
 func _on_button_start_pressed() -> void:
 	$TabMoveSound.play()
+	campaign_menu.show_campaign()
+
+
+func _open_custom_worlds() -> void:
 
 	# refreshes the dropdown in case new levels were added since the menu loaded the first time
 	# refreshes the campaign levels before showing popup
 	# users can drag and drop to the file outside of the game so this is important
 	if level_dropdown != null and level_dropdown.has_method("populate_levels"):
 		level_dropdown.populate_levels()
+	_update_play_button()
 
 	if level_popup != null:
 		level_popup.popup_centered()
@@ -152,7 +165,6 @@ func _on_level_file_selected(path: String) -> void:
 
 	dest_file.store_string(contents)
 	dest_file.close()
-	#refresh the level list after a custom level is uploaded
 	if level_dropdown != null and level_dropdown.has_method("populate_levels"):
 		level_dropdown.populate_levels()
 
@@ -160,6 +172,7 @@ func _on_level_file_selected(path: String) -> void:
 		level_dropdown.select_path(dest_path)
 	else:
 		SelectedLevel.path = dest_path
+	_update_play_button()
 
 
 # plays a little fade animation then loads the workstation scene

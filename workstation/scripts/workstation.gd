@@ -1,5 +1,13 @@
 extends Control
 
+const Campaign = preload("res://config/campaign_levels.gd")
+var campaign_progress_path: String = Campaign.SAVE_PATH
+var campaign_instructions: Label
+var campaign_hint: Label
+var campaign_panel: VBoxContainer
+var campaign_next_button: Button
+var campaign_hint_button: Button
+
 # === UI references ===
 # all the workspace pieces live here: editor, output, controls, and level viewport
 @onready var editor: CodeEdit = $RootMargin/MainColumn/WorkspaceSplit/EditorOutputSplit/EditorSection/EditorPanel/EditorMargin/Editor
@@ -150,6 +158,7 @@ func _ready() -> void:
 	_setup_editor()
 	_setup_syntax_highlighting()
 	_setup_language_selector()
+	_setup_campaign_ui()
 
 	# compass updates whenever the player's logical facing changes
 	EventManager.player_facing_changed.connect(_on_player_facing_changed)
@@ -197,6 +206,50 @@ func _ready() -> void:
 
 	await get_tree().process_frame
 	_load_level_scene(true)
+
+
+func _setup_campaign_ui() -> void:
+	campaign_panel = VBoxContainer.new()
+	campaign_panel.add_theme_constant_override("separation", 6)
+	var column := $RootMargin/MainColumn
+	column.add_child(campaign_panel)
+	column.move_child(campaign_panel, 1)
+	campaign_instructions = Label.new()
+	campaign_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	campaign_instructions.add_theme_font_size_override("font_size", 20)
+	campaign_panel.add_child(campaign_instructions)
+	campaign_hint_button = Button.new()
+	campaign_hint_button.text = "Show Hint"
+	campaign_hint_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	campaign_hint_button.pressed.connect(func():
+		campaign_hint.visible = not campaign_hint.visible
+		campaign_hint_button.text = "Hide Hint" if campaign_hint.visible else "Show Hint")
+	campaign_panel.add_child(campaign_hint_button)
+	campaign_hint = Label.new()
+	campaign_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	campaign_hint.add_theme_font_size_override("font_size", 18)
+	campaign_hint.add_theme_color_override("font_color", Color("8ed6ef"))
+	campaign_panel.add_child(campaign_hint)
+	campaign_next_button = Button.new()
+	campaign_next_button.text = "Next Level"
+	campaign_next_button.custom_minimum_size.y = 36
+	campaign_next_button.pressed.connect(_on_win_next)
+	var buttons := $WinOverlay/WinCard/WinContent/WinButtons
+	buttons.add_child(campaign_next_button)
+	buttons.move_child(campaign_next_button, 0)
+	campaign_next_button.hide()
+
+
+func _refresh_campaign_instructions() -> void:
+	var index := Campaign.index_for_path(SelectedLevel.path)
+	campaign_panel.visible = index >= 0
+	campaign_hint.hide()
+	campaign_hint_button.text = "Show Hint"
+	if index < 0:
+		return
+	var description := PackedStringArray(current_level_definition.get("description", []))
+	campaign_instructions.text = "Level %d / %d - %s\n%s" % [index + 1, Campaign.LEVELS.size(), Campaign.LEVELS[index].title, " ".join(description)]
+	campaign_hint.text = current_level_definition.get("hint", "")
 
 
 func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = false) -> void:
@@ -255,6 +308,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 		return
 
 	current_level_definition = raw.definition
+	_refresh_campaign_instructions()
 
 	# preload starter code into editor only when requested
 	if load_editor_text:
@@ -738,6 +792,15 @@ func _on_player_lose(reason: String) -> void:
 func _on_level_complete() -> void:
 	_run_outcome = "win"
 	_stop_execution()
+	var campaign_index := Campaign.index_for_path(SelectedLevel.path)
+	if campaign_index >= 0:
+		var save_error := Campaign.mark_complete(SelectedLevel.path, campaign_progress_path)
+		if save_error != OK:
+			log_error("Could not save campaign progress. Replay this level to try again.")
+		campaign_next_button.visible = save_error == OK and campaign_index + 1 < Campaign.LEVELS.size()
+		if campaign_index == Campaign.LEVELS.size() - 1:
+			$WinOverlay/WinCard/WinContent/WinTitle.text = "Campaign Complete!"
+			$WinOverlay/WinCard/WinContent/WinMessage.text = "You completed all three levels. Well done!"
 
 	log_header("level complete")
 	log_success("Your robot reached the goal!")
@@ -761,10 +824,20 @@ func _on_win_retry() -> void:
 
 
 func _on_win_next() -> void:
+	var next_index := Campaign.index_for_path(SelectedLevel.path) + 1
+	if next_index <= 0 or not Campaign.is_unlocked(next_index, Campaign.completed_ids(campaign_progress_path)):
+		return
+	_stop_execution()
+	SelectedLevel.path = Campaign.LEVELS[next_index].path
 	win_overlay.visible = false
+	_is_handling_lose = false
 	_set_controls_disabled(false)
-	log_header("info")
-	log_line("Next level coming soon!")
+	_on_reset_button_pressed()
+	_load_editor_template_for_current_language()
+	$WinOverlay/WinCard/WinContent/WinTitle.text = "Level Complete!"
+	$WinOverlay/WinCard/WinContent/WinMessage.text = "Your robot reached the goal!"
+	campaign_next_button.hide()
+	editor.grab_focus()
 
 
 func _on_go_to_menu() -> void:
