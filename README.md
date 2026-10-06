@@ -33,6 +33,7 @@ Code & Conquer, heavily inspired by Reeborg's World, is an educational programmi
 
 Just want to play? Download a pre-built executable — no Godot required.
 
+<!-- Will need to update this once we make our own release -->
 Head to the [**Releases**](https://github.com/MakariousS44/Code-and-Conquer/releases/tag/v1.0.0) page and grab the latest build for your OS:
 
 - **Windows** — `CodeAndConquer_Windows.zip`
@@ -53,7 +54,7 @@ Before you begin, ensure you have the following installed:
 
 **Git** — [Download Git](https://git-scm.com/install/)
 
-**Godot Engine** — Currently using Godot 4.6.1.
+**Godot Engine** — Currently using Godot 4.7.2 as of Fall 2026.
 
 - [For Windows](https://godotengine.org/download/windows/)
 - [For Linux](https://godotengine.org/download/linux/)
@@ -161,4 +162,4 @@ int main() {
 
 ---
 
-*Pickaxe Productions — Spring 2026*
+*Pickaxe Productions — Fall 2026*
