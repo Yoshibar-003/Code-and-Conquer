@@ -6,6 +6,9 @@ const LEVELS := [
 	{"id": "first_steps", "title": "First Steps", "concept": "Move forward", "path": "res://data/campaign_levels/campaign/01_first_steps.json"},
 	{"id": "around_the_corner", "title": "Around the Corner", "concept": "Move and turn left", "path": "res://data/campaign_levels/campaign/02_around_the_corner.json"},
 	{"id": "winding_path", "title": "The Winding Path", "concept": "Plan a sequence of commands", "path": "res://data/campaign_levels/campaign/03_winding_path.json"},
+	{"id": "long_hallway", "title": "Long Hallway", "concept": "A long hallway", "path": "res://data/campaign_levels/campaign/04_long_hallway.json"},
+	{"id": "staircase", "title": "Staircase Pattern", "concept": "A repeatable pattern", "path": "res://data/campaign_levels/campaign/05_staircase.json"},
+	{"id": "first_pickup", "title": "First Pickup", "concept": "An object must be picked up", "path": "res://data/campaign_levels/campaign/06_first_pickup.json"},
 ]
 
 static func index_for_path(path: String) -> int:

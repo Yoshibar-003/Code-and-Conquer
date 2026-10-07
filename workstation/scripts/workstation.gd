@@ -122,7 +122,7 @@ var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move
 var _run_had_error: bool = false  # set when the subprocess emits [ERROR]
 const MOVE_LIMIT := 999
 const CMD_LIMIT := 9999
-const PROGRAM_TIMEOUT_SECONDS := 10.0
+const PROGRAM_TIMEOUT_SECONDS := 30.0
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
 const ALLOWED_IPC_QUERIES := [
 	"FRONT_IS_CLEAR",
@@ -804,7 +804,7 @@ func _on_level_complete() -> void:
 		campaign_next_button.visible = save_error == OK and campaign_index + 1 < Campaign.LEVELS.size()
 		if campaign_index == Campaign.LEVELS.size() - 1:
 			$WinOverlay/WinCard/WinContent/WinTitle.text = "Campaign Complete!"
-			$WinOverlay/WinCard/WinContent/WinMessage.text = "You completed all three levels. Well done!"
+			$WinOverlay/WinCard/WinContent/WinMessage.text = "You completed all six levels. Well done!"
 
 	log_header("level complete")
 	log_success("Your robot reached the goal!")
