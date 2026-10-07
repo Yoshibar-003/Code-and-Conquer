@@ -96,7 +96,7 @@ Godot does not automatically detect new folders on your drive; you must manually
 1. Launch the Godot Engine.
 2. In the Project Manager window, click the `Import Existing Project` button in the center or the `Import` button on the top-left.
 3. Navigate into the folder you just cloned and look for the **project.godot** file.
-    - Note: The project.godot file is the brain of the project. Godot cannot import a folder unless this file is present in the root.
+	- Note: The project.godot file is the brain of the project. Godot cannot import a folder unless this file is present in the root.
 4. Select the file, open, and import.
 
 ---
@@ -152,12 +152,12 @@ is_facing_west();  // Robot is currently facing west
 
 ```cpp
 int main() {
-    for (int i = 0; i < 4; i++) {
-        move();
-        move();
-        move();
-        turn_left();
-    }
+	for (int i = 0; i < 4; i++) {
+		move();
+		move();
+		move();
+		turn_left();
+	}
 }
 ```
 
