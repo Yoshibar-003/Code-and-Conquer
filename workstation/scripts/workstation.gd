@@ -701,22 +701,24 @@ func _on_settings_button_pressed() -> void:
 
 
 # === funny lose messages ===
+# Message for a specific loss (e.g., trying to move into a wall) commented out for now
+# Maybe make separate arrays for the different lose conditions? (see TODO for get_funny_lose_message)
 const LOSE_MESSAGES := [
-	"Your player has left the chat.",
+# 	"Your player has left the chat.",     # walking off the map?
 	"Have you...tried turning it off and on again?",
-	"Your player took an unscheduled vacation.",
+#	"Your player took an unscheduled vacation.",     # stopping while on an empty tile
 	"Your player says: \"I quit.\"",
 	"404: Success not found.",
-	"Instructions unclear. Your player now in another dimension.",
-	"Your player walked into a wall. Impressive dedication!",
+#	"Instructions unclear. Your player now in another dimension.",     # walking off the map
+#	"Your player walked into a wall. Impressive dedication!",     # walking into a wall
 	"Your player has filed a complaint with HR.",
-	"Maybe try fewer walls next time?",
-	"Your player called in sick.",
+#	"Maybe try fewer walls next time?",     # walking into a wall
+#	"Your player called in sick.",     # idek what lose condition this should be
 	"The matrix has rejected your code.",
 	"Skill issue detected.",
 	"Your player tripped over their own code.",
 	"Your player is on strike. Have you tried negotiating?",
-	"Splat. Your player is now wall decor.",
+#	"Splat. Your player is now wall decor.",     # walking into a wall
 ]
 
 func _set_controls_disabled(disabled: bool) -> void:
@@ -735,6 +737,7 @@ func _set_controls_disabled(disabled: bool) -> void:
 		library_overlay.hide()
 
 
+# TODO: Pick a message for the *specific* lose condition
 func _get_funny_lose_message() -> String:
 	return LOSE_MESSAGES[randi() % LOSE_MESSAGES.size()]
 
