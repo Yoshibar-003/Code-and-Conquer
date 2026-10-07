@@ -30,7 +30,7 @@ int main()
     move();
     move();
     
-    //pick_object(); uncomment this to pick it up
+    //pick_object(); //uncomment this line to pick it up
     
     // turn around
     turn_left();
