@@ -125,17 +125,18 @@ const CMD_LIMIT := 9999
 const PROGRAM_TIMEOUT_SECONDS := 10.0
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
 const ALLOWED_IPC_QUERIES := [
-	"FRONT_IS_CLEAR", 
-	"RIGHT_IS_CLEAR", 
+	"FRONT_IS_CLEAR",
+	"RIGHT_IS_CLEAR",
 	"LEFT_IS_CLEAR",
-	"WALL_IN_FRONT", 
-	"WALL_ON_RIGHT", 
+	"WALL_IN_FRONT",
+	"WALL_ON_RIGHT",
 	"WALL_ON_LEFT",
-	"AT_GOAL", 
-	"OBJECT_HERE", 
+	"AT_GOAL",
+	"OBJECT_HERE",
 	"CARRIES_OBJECT",
-	"IS_FACING_NORTH", 
-	"IS_FACING_EAST", 
+	"IS_FACING_NORTH",
+	"IS_FACING_EAST",
+	"IS_FACING_SOUTH",
 	"IS_FACING_WEST",
 ]
 const MAX_STUDENT_OUTPUT_LINES := 200
@@ -1169,6 +1170,8 @@ func _answer_query(query: String) -> String:
 			return _bool(facing == "north")
 		"IS_FACING_EAST":
 			return _bool(facing == "east")
+		"IS_FACING_SOUTH":
+			return _bool(facing == "south")
 		"IS_FACING_WEST":
 			return _bool(facing == "west")
 		"AT_GOAL":

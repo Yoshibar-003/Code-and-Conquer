@@ -23,6 +23,7 @@ const SENSORS := [
 	{ "name": "carries_object",  "query": "CARRIES_OBJECT"  },
 	{ "name": "is_facing_north", "query": "IS_FACING_NORTH" },
 	{ "name": "is_facing_east", "query": "IS_FACING_EAST" },
+	{ "name": "is_facing_south", "query": "IS_FACING_SOUTH" },
 	{ "name": "is_facing_west", "query": "IS_FACING_WEST" },
 ]
 

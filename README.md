@@ -144,6 +144,7 @@ object_here();      // An object is on the current tile
 carries_object();   // Robot is carrying an object
 is_facing_north();  // Robot is currently facing north
 is_facing_east();  // Robot is currently facing east
+is_facing_south();  // Robot is currently facing south
 is_facing_west();  // Robot is currently facing west
 ```
 
