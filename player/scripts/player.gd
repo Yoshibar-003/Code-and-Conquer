@@ -182,3 +182,6 @@ func put_object() -> void:
 		carried_object[obj_name] -= 1
 		if carried_object[obj_name] <= 0:
 			carried_object.erase(obj_name)
+
+# potential addition of ability for player to place walls
+# function would create a wall on the tile in front of the robot
