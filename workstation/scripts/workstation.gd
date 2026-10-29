@@ -122,7 +122,7 @@ var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move
 var _run_had_error: bool = false  # set when the subprocess emits [ERROR]
 const MOVE_LIMIT := 999
 const CMD_LIMIT := 9999
-const PROGRAM_TIMEOUT_SECONDS := 30.0
+const PROGRAM_TIMEOUT_SECONDS := 300.0  # 5 minutes
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
 const ALLOWED_IPC_QUERIES := [
 	"FRONT_IS_CLEAR",
