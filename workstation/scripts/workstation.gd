@@ -1588,7 +1588,7 @@ func _build_report() -> String:
 	report += "\n"
 	report += "SEQUENCE LETTERS\n"
 	report += "  M  move forward\n"
-	report += "  T  turn left\n"
+	report += "  L  turn left\n"
 	report += "  U  pick up object\n"
 	report += "  D  put down object\n"
 	report += "\n"
@@ -1598,7 +1598,7 @@ func _build_report() -> String:
 	report += "  .  finished — no win condition on this level\n"
 	report += "  #  move limit hit (%d moves)\n" % _move_limit
 	report += "  @  command limit hit (%d commands)\n" % _cmd_limit
-	report += "  $  time limit hit (%.1f seconds)\n" % _time_limit_seconds
+	report += "  T  time limit hit (%.1f seconds)\n" % _time_limit_seconds
 	report += "\n"
 	report += "OBJECT LETTERS\n"
 	report += "  A  apple\n"
@@ -1622,7 +1622,7 @@ func _cmd_to_report_letter(cmd: String) -> String:
 		"MOVE":
 			return "M"
 		"TURN_LEFT":
-			return "T"
+			return "L"
 		"PICK_OBJECT":
 			return "U"
 		"PUT_OBJECT":
@@ -1643,7 +1643,7 @@ func _run_outcome_marker() -> String:
 		"cmd_limit":
 			return "@"
 		"time_limit":
-			return "$"
+			return "T"
 		_:
 			return "?"
 
