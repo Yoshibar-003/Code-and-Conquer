@@ -482,9 +482,21 @@ func _setup_syntax_highlighting() -> void:
 	var highlighter := preload("res://workstation/scripts/cpp_highlighter.gd").new()
 
 	var keywords := [
-		"int", "double", "float", "bool", "char", "void",
-		"if", "else", "while", "for", "return",
-		"true", "false", "break", "continue"
+		"alignas", "alignof", "and", "and_eq", "asm", "auto",
+		"bitand", "bitor", "bool", "break", "case", "catch",
+		"char", "char8_t", "char16_t", "char32_t", "class", "compl",
+		"concept", "const", "consteval", "constexpr", "constinit", "const_cast",
+		"continue", "co_await", "co_return", "co_yield", "decltype", "default",
+		"delete", "do", "double", "dynamic_cast", "else", "enum", "explicit",
+		"export", "extern", "false", "float", "for", "friend", "goto", "if",
+		"inline", "int", "long", "mutable", "namespace", "new", "noexcept",
+		"not", "not_eq", "nullptr", "operator", "or", "or_eq", "private",
+		"protected", "public", "register", "reinterpret_cast", "requires",
+		"return", "short", "signed", "sizeof", "static", "static_assert",
+		"static_cast", "struct", "switch", "template", "this", "thread_local",
+		"throw", "true", "try", "typedef", "typeid", "typename", "union",
+		"unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while",
+		"xor", "xor_eq"
 	]
 	for word in keywords:
 		highlighter.add_keyword_color(word, _syntax_color(Color(0.40, 0.70, 1.00)))
@@ -510,9 +522,10 @@ func _setup_python_highlighting() -> void:
 	var highlighter := CodeHighlighter.new()
 
 	var keywords := [
-		"def", "if", "elif", "else", "while", "for", "in",
-		"return", "True", "False", "None", "and", "or", "not",
-		"pass", "break", "continue"
+		"False", "None", "True", "and", "as", "assert", "async", "await",
+		"break", "class", "continue", "def", "del", "elif", "else", "except",
+		"finally", "for", "global", "if", "in", "is", "lambda", "nonlocal",
+		"not", "or", "pass", "raise", "return", "try", "while", "with", "yield"
 	]
 	for word in keywords:
 		highlighter.add_keyword_color(word, _syntax_color(Color(0.40, 0.70, 1.00)))
