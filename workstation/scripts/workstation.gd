@@ -479,7 +479,7 @@ func _syntax_color(color: Color) -> Color:
 	return color
 
 func _setup_syntax_highlighting() -> void:
-	var highlighter := CodeHighlighter.new()
+	var highlighter := preload("res://workstation/scripts/cpp_highlighter.gd").new()
 
 	var keywords := [
 		"int", "double", "float", "bool", "char", "void",
@@ -499,12 +499,10 @@ func _setup_syntax_highlighting() -> void:
 	highlighter.symbol_color = _syntax_color(Color(0.85, 0.85, 0.85))
 	highlighter.function_color = _syntax_color(Color(0.95, 0.85, 0.45))
 	highlighter.member_variable_color = _syntax_color(Color(0.85, 0.85, 0.85))
-	highlighter.add_color_region("\"", "\"", _syntax_color(Color(0.60, 0.90, 0.60)), false)
-	highlighter.add_color_region("'", "'", _syntax_color(Color(0.60, 0.90, 0.60)), false)
-	highlighter.add_color_region("//", "", _syntax_color(Color(0.50, 0.50, 0.50)), true)
-	highlighter.add_color_region("/*", "*/", _syntax_color(Color(0.50, 0.50, 0.50)), false)
 	highlighter.add_keyword_color("include", _syntax_color(Color(0.95, 0.45, 0.75)))
 
+	highlighter.string_color = _syntax_color(Color(0.60, 0.90, 0.60))
+	highlighter.comment_color = _syntax_color(Color(0.50, 0.50, 0.50))
 	editor.syntax_highlighter = highlighter
 
 
