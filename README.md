@@ -166,10 +166,10 @@ int main() {
 Python version:
 ```py
 for i in range(4):
-    move()
-    move()
-    move()
-    turn_left()
+	move()
+	move()
+	move()
+	turn_left()
 ```
 
 ---
