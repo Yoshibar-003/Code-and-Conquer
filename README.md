@@ -119,7 +119,7 @@ Press **F5** or click the **Play** button in the top-right of the Godot editor.
 
 ## Available Commands & Sensors
 
-These robot functions work the same in both C++ and Python.
+These robot functions work the same in both C++ and Python. (Remember: Only C++ requires a semicolon to terminate a statement!)
 
 ### Commands (perform an action)
 
@@ -149,15 +149,27 @@ is_facing_west();  // Robot is currently facing west
 ```
 
 **Example — walk in a square:**
+
+C++ Version:
 ```cpp
 int main() {
-	for (int i = 0; i < 4; i++) {
+	for (int i {0}; i < 4; i++) {
 		move();
 		move();
 		move();
 		turn_left();
 	}
+	return 0;
 }
+```
+
+Python Version:
+```py
+for i in range(4):
+    move()
+    move()
+    move()
+    turn_left()
 ```
 
 ---
