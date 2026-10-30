@@ -1,3 +1,5 @@
+<img src="https://i.imgur.com/UqUsdi3.png" alt="Code & Conquer logo" width="500">
+
 # Code & Conquer
 **A programming game and learning tool built with Godot 4**
 
