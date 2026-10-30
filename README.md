@@ -150,7 +150,7 @@ is_facing_west();  // Robot is currently facing west
 
 **Example — walk in a square:**
 
-C++ Version:
+C++ version:
 ```cpp
 int main() {
 	for (int i {0}; i < 4; i++) {
@@ -163,7 +163,7 @@ int main() {
 }
 ```
 
-Python Version:
+Python version:
 ```py
 for i in range(4):
     move()
