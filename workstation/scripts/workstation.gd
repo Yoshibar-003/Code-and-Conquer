@@ -78,6 +78,7 @@ var validator = preload(Paths.CPP_VALIDATOR).new()
 var generator = preload(Paths.CPP_GENERATOR).new()
 var compiler = preload(Paths.CPP_DRIVER).new()
 var py_pipeline = preload(Paths.PYTHON_PIPELINE).new()
+var js_executor = preload(Paths.JS_EXECUTOR).new()
 var _commands = preload(Paths.ROBOT_COMMANDS).new()
 
 # === language state ===
@@ -97,6 +98,12 @@ var player_node: Node = null
 # 2D flat grid view toggle
 var flat_grid_node: Node2D = null
 var _is_2d_mode: bool = false
+
+# RUR public data storage for JavaScript scripts
+var rur_public_data: Dictionary = {}
+
+# Movement history for path validation (stores [x, y] positions)
+var movement_history: Array = []
 
 # === IPC state ===
 var _ipc_server = null
@@ -309,6 +316,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	for child in game_subviewport.get_children():
 		child.queue_free()
 	flat_grid_node = null
+	movement_history.clear()  # Clear movement history on level load
 
 	# create and attach the playable level scene
 	game_instance = level_scene_resource.instantiate()
@@ -358,7 +366,25 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	current_level_definition = raw.definition
 	_refresh_campaign_instructions()
 
+	# Execute onload script if present (Reeborg's World dynamic world generation)
+	if current_level_definition.has("onload"):
+		var onload_script = current_level_definition["onload"]
+		if onload_script is Array and not onload_script.is_empty():
+			print("Executing onload script...")
+			var js_result = js_executor.execute_script(onload_script, current_level_definition)
+			if js_result.ok:
+				current_level_definition = js_result.modified_data
+				rur_public_data = js_result.public_data
+				print("Onload script executed successfully")
+			else:
+				push_warning("Onload script failed: " + js_result.error)
+				# Continue with original data if script fails
+
 	# load limits from JSON if present, otherwise use defaults
+	# Check if RUR.MAX_STEPS was set by onload script and sync to cmd_limit
+	if current_level_definition.has("_MAX_STEPS"):
+		_cmd_limit = int(current_level_definition["_MAX_STEPS"])
+		print("RUR.MAX_STEPS set command limit to: ", _cmd_limit)
 	var limits_data = current_level_definition.get("limits", {})
 	if limits_data is Dictionary:
 		_move_limit = limits_data.get("move_limit", DEFAULT_MOVE_LIMIT)
@@ -741,6 +767,7 @@ func _on_reset_button_pressed() -> void:
 	_cmd_history.clear()
 	_step_index = 0
 	_in_replay = false
+	movement_history.clear()  # Clear movement history on reset
 	run_button.text = "▶ Run"
 	run_button.disabled = false
 	step_button.disabled = false
@@ -906,6 +933,22 @@ func _on_player_lose(reason: String) -> void:
 
 
 func _on_level_complete() -> void:
+	# Execute post script if present (Reeborg's World post-execution validation)
+	if current_level_definition.has("post"):
+		var post_script = current_level_definition["post"]
+		if post_script is Array and not post_script.is_empty():
+			print("Executing post script...")
+			var js_result = js_executor.execute_script(post_script, current_level_definition, movement_history)
+			if js_result.ok:
+				current_level_definition = js_result.modified_data
+				rur_public_data = js_result.public_data
+				print("Post script executed successfully")
+			else:
+				push_warning("Post script failed: " + js_result.error)
+				# If post script fails, treat as incomplete
+				_trigger_incomplete_lose(js_result.error)
+				return
+
 	$WinSound.play()
 	_run_outcome = "win"
 	_stop_execution()
@@ -993,6 +1036,19 @@ func _run_pipeline() -> void:
 	var start_paused: bool = _paused
 	_stop_execution()
 	_student_output_lines = 0
+
+	# Execute pre script if present (Reeborg's World pre-execution setup)
+	if current_level_definition.has("pre"):
+		var pre_script = current_level_definition["pre"]
+		if pre_script is Array and not pre_script.is_empty():
+			print("Executing pre script...")
+			var js_result = js_executor.execute_script(pre_script, current_level_definition)
+			if js_result.ok:
+				current_level_definition = js_result.modified_data
+				rur_public_data = js_result.public_data
+				print("Pre script executed successfully")
+			else:
+				push_warning("Pre script failed: " + js_result.error)
 
 	if editor.text.length() > MAX_STUDENT_SOURCE_CHARS:
 		log_error("Source code is too large. Maximum size is 100,000 characters.")
@@ -1272,6 +1328,8 @@ func _execute_cmd(cmd: String, src_line: int) -> void:
 				_trigger_move_limit_lose()
 				return
 			await player_node.move_forward(exec_speed)
+			# Record movement history for path validation
+			movement_history.append([player_node.grid_x, player_node.grid_y])
 		"TURN_LEFT":
 			player_node.turn_left()
 			await get_tree().create_timer(exec_speed * 0.2).timeout
