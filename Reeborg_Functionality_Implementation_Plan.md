@@ -14,8 +14,8 @@ This document describes the six-phase plan to assist current and future develope
 ### Phase 1: JavaScript/Reeborg API Execution (onload/pre/post) with Stubs
 - Reeborg's World levels use JavaScript code in three fields:
   - `onload`: Dynamic world generation (random objects, variable grid sizes, path validation)
-  - `pre`: Setup before student code runs (e.g., `RUR.show_path`, `RUR.MAX_STEPS`)
-  - `post`: Validation after student code runs (e.g., `RUR.check_path`, custom error messages)
+  - `pre`: Setup before user code runs (e.g., `RUR.show_path`, `RUR.MAX_STEPS`)
+  - `post`: Validation after user code runs (e.g., `RUR.check_path`, custom error messages)
 - Examples:
   - Around 1 - apple uses `onload` to randomly place apples
   - Around 1 - variable uses `onload` to dynamically resize the world
@@ -145,13 +145,13 @@ When a level loads:
 #### Pre-Execution (pre)
 **File:** `workstation/scripts/workstation.gd`
 
-When student code runs:
+When user code runs:
 1. `_run_pipeline()` is called
-2. If `pre` script exists, it's executed before student code compilation
+2. If `pre` script exists, it's executed before user code compilation
 3. Used for visual hints (e.g., making path semi-transparent)
 4. Level data can be modified before execution
 
-**Impact:** Visual adjustments and execution limits can be set before student code runs
+**Impact:** Visual adjustments and execution limits can be set before user code runs
 
 #### Post-Execution (post)
 **File:** `workstation/scripts/workstation.gd`
@@ -225,7 +225,7 @@ Tests cover:
 1. Load a level with onload script (e.g., Around 1)
 2. Verify console output shows "Executing onload script..."
 3. Check that grid size and objects are modified as expected
-4. Run student code and verify pre/post scripts execute
+4. Run user code and verify pre/post scripts execute
 5. Reset and verify history is cleared
 
 ## Limitations
