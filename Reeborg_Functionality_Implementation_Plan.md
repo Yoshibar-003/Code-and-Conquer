@@ -61,6 +61,11 @@ This document describes the six-phase plan to assist current and future develope
   - Add to object renderer in `_build_objects()`
 
 ### Phase 6: Remaining Features
+- **Goal wall condition**
+  - Rain and Storm levels include `goal.walls` sub-objects (walls that must be present at goal), while Code and Conquer's win condition in `map_view.gd` only checks position and objects.
+  - Required Changes:
+    - Extend `check_win_condition()` to validate `goal.walls`
+    - Check that specified walls exist at goal positions
 - **Robot model/sprite variants**
   - Reeborg levels can specify robot models in the `robots[0].model` field:
     - `classic` (default)
@@ -70,11 +75,6 @@ This document describes the six-phase plan to assist current and future develope
     - Add alternate robot sprite assets
     - Modify `initialize_from_level()` to load the specified model
     - Map Reeborg model names to sprite resources
-- **Goal wall condition**
-  - Rain and Storm levels include `goal.walls` sub-objects (walls that must be present at goal), while Code and Conquer's win condition in `map_view.gd` only checks position and objects.
-  - Required Changes:
-    - Extend `check_win_condition()` to validate `goal.walls`
-    - Check that specified walls exist at goal positions
 - **Background image support**
   - Hurdle levels include background_image fields (e.g., `"worlds/images/stadium.png"` in Hurdle 1), while Code and Conquer has no background image loading.
   - Required Changes:
