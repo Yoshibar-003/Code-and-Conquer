@@ -100,7 +100,7 @@ Note: The Level Editor and other related systems will also need to be updated as
 
 # Remainder of this document discusses the implementation of Phase 1 and the current status.
 
-As of Fall 2026, Phase 1 (JavaScript API with Stubs) has been implemented.
+As of Fall 2026, progress has been made toward Phase 1 (JavaScript API) implementation.
 
 ## What Was Implemented
 
