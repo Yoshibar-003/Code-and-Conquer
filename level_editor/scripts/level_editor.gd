@@ -160,69 +160,93 @@ func _input(event: InputEvent) -> void:
 		grid.pan_by(event.relative)
 		get_viewport().set_input_as_handled()
 
+# Opens up file directory 
 func _on_save_button_pressed() -> void:
 	var level_name := level_name_input.text.strip_edges()
 	if level_name.is_empty():
 		return
+
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.current_dir = ProjectSettings.globalize_path(
+		PROJECT_CUSTOM_LEVELS_DIR if OS.has_feature("editor") else PLAYER_CUSTOM_LEVELS_DIR
+	)
+	dialog.current_file = _make_level_filename(level_name) + ".json"
+	dialog.add_filter("*.json ; Level files")
+
+	DirAccess.make_dir_recursive_absolute(dialog.current_dir)
+
+	add_child(dialog)
+	dialog.file_selected.connect(_save_level_to_path.bind(dialog))
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered_ratio(0.75)
+	
+# Separate function to actually save the file
+func _save_level_to_path(path: String, dialog: FileDialog) -> void:
+	dialog.queue_free()
+
+	var level_name := level_name_input.text.strip_edges()
+	if level_name.is_empty():
+		return
+
+	if not path.to_lower().ends_with(".json"):
+		path += ".json"
+
 	document.data["name"] = level_name
 	document.data["description"] = [description_input.text]
-	# Save limits
+
 	var limits_data := {}
+
 	if not move_limit_default_checkbox.button_pressed and move_limit_input.value > 0:
 		limits_data["move_limit"] = int(move_limit_input.value)
+
 	if not cmd_limit_default_checkbox.button_pressed and cmd_limit_input.value > 0:
 		limits_data["cmd_limit"] = int(cmd_limit_input.value)
+
 	if not time_limit_default_checkbox.button_pressed and time_limit_input.value > 0:
 		limits_data["time_limit_seconds"] = float(time_limit_input.value)
+
 	if not limits_data.is_empty():
 		document.data["limits"] = limits_data
 	elif document.data.has("limits"):
 		document.data.erase("limits")
+	# Keep a recoverable copy until the completed temporary file replaces it
+	var temporary_path := path + ".tmp"
+	var backup_path := path + ".bak"
 
-	# Project levels stay in the repository while developing in Godot. Exported games
-	# cannot write to res://, so player-created levels use the writable user:// folder.
-	var folder_path := PROJECT_CUSTOM_LEVELS_DIR if OS.has_feature("editor") else PLAYER_CUSTOM_LEVELS_DIR
-	var full_folder_path := ProjectSettings.globalize_path(folder_path)
-
-	DirAccess.make_dir_recursive_absolute(full_folder_path)
-
-	var file_name := _make_level_filename(level_name) + ".json"
-	var save_path := folder_path.path_join(file_name)
-	if FileAccess.file_exists(save_path):
-		var existing := FileAccess.open(save_path, FileAccess.READ)
-		var existing_json := JSON.new()
-		if existing == null or existing_json.parse(existing.get_as_text()) != OK or typeof(existing_json.data) != TYPE_DICTIONARY or str(existing_json.data.get("name", "")) != level_name:
-			status_label.text = "Choose a different name; this filename is already used."
-			return
-
-	var temporary_path := folder_path.path_join(file_name + ".tmp")
-	var backup_path := folder_path.path_join(file_name + ".bak")
 	if FileAccess.file_exists(backup_path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(backup_path))
-	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
+		DirAccess.remove_absolute(backup_path)
 
+	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
 	if file == null:
 		push_error("Could not save level.")
+		status_label.text = "Could not save level."
 		return
 
 	file.store_string(JSON.stringify(document.data, "\t"))
 	file.close()
-	# Keep a recoverable copy until the completed temporary file replaces it.
-	if FileAccess.file_exists(save_path):
-		DirAccess.rename_absolute(ProjectSettings.globalize_path(save_path), ProjectSettings.globalize_path(backup_path))
-	var rename_error := DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary_path), ProjectSettings.globalize_path(save_path))
+
+	if FileAccess.file_exists(path):
+		DirAccess.rename_absolute(path, backup_path)
+
+	var rename_error := DirAccess.rename_absolute(temporary_path, path)
+
 	if rename_error != OK:
 		if FileAccess.file_exists(backup_path):
-			DirAccess.rename_absolute(ProjectSettings.globalize_path(backup_path), ProjectSettings.globalize_path(save_path))
+			DirAccess.rename_absolute(backup_path, path)
+
 		status_label.text = "Could not finish saving level."
 		return
+
 	if FileAccess.file_exists(backup_path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(backup_path))
+		DirAccess.remove_absolute(backup_path)
 
 	save_button.text = "Saved!"
 	status_label.text = "Saved: %s" % level_name
-	print("Level saved to: ", ProjectSettings.globalize_path(save_path))
-
+	print("Level saved to: ", path)
+	
+	
 
 func _on_level_name_changed(new_name: String) -> void:
 	save_button.disabled = new_name.strip_edges().is_empty()
