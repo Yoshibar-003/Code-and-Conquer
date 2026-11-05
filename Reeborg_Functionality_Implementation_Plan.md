@@ -39,12 +39,13 @@ This document describes the six-phase plan to assist current and future develope
   - Add visual distinction for `grass` tiles, `water` tiles, etc.
     - Like in Reeborg's World, walking into a `water` tile should make you become "stuck in the mud"
 
-### Phase 3: Path Rendering
-- Reeborg levels can have visual hints (e.g., Around 1). In this case, a dashed line with arrows shows required path via `RUR.show_path()`.
-- Required Changes:
-  - Add path overlay system
-  - Render `RUR.show_path()` as visual overlay
-  - Implement grid display modes
+### Phase 3: Wall Interaction and Wall Goal Conditions
+  - Reeborg's World has a `build_wall()` action command, which is not present in Code and Conquer.
+  - Rain and Storm levels include `goal.walls` sub-objects (walls that must be present at goal), while Code and Conquer's win condition in `map_view.gd` only checks position and objects.
+  - Required Changes:
+    - Add `BUILD_WALL` action command
+    - Extend `check_win_condition()` to validate `goal.walls`
+    - Check that specified walls exist at goal positions
 
 ### Phase 4: Token Support in Robot Inventory
 - Reeborg levels levels can specify tokens in the robot data (e.g., Tokens 1 has `"tokens": 0` in robot data). Code and Conquer's player script in `player.gd` only tracks `carried_object` dictionary and doesn't have a dedicated token field.
@@ -61,11 +62,6 @@ This document describes the six-phase plan to assist current and future develope
   - Add to object renderer in `_build_objects()`
 
 ### Phase 6: Remaining Features
-- **Goal wall condition**
-  - Rain and Storm levels include `goal.walls` sub-objects (walls that must be present at goal), while Code and Conquer's win condition in `map_view.gd` only checks position and objects.
-  - Required Changes:
-    - Extend `check_win_condition()` to validate `goal.walls`
-    - Check that specified walls exist at goal positions
 - **Robot model/sprite variants**
   - Reeborg levels can specify robot models in the `robots[0].model` field:
     - `classic` (default)
@@ -75,6 +71,12 @@ This document describes the six-phase plan to assist current and future develope
     - Add alternate robot sprite assets
     - Modify `initialize_from_level()` to load the specified model
     - Map Reeborg model names to sprite resources
+- **Path Rendering**
+  - Reeborg levels can have visual hints (e.g., Around 1). In this case, a dashed line with arrows shows required path via `RUR.show_path()`.
+  - Required Changes:
+    - Add path overlay system
+    - Render `RUR.show_path()` as visual overlay
+    - Implement grid display modes
 - **Background image support**
   - Hurdle levels include background_image fields (e.g., `"worlds/images/stadium.png"` in Hurdle 1), while Code and Conquer has no background image loading.
   - Required Changes:
@@ -86,6 +88,8 @@ This document describes the six-phase plan to assist current and future develope
   - Required Changes:
     - Implement decorative object rendering
     - Execute during `onload` script processing
+
+Note: The Level Editor and other related systems will also need to be updated as appropriate for each phase.
 
   
 <br>
