@@ -9,7 +9,7 @@ This document describes the six-phase plan to assist current and future develope
 
 Note: Phase 1—JavaScript/Reeborg API Execution (onload/pre/post)—is prioritized, as without JS execution and correct data propagation, everything else would be built on a broken foundation. After Phase 1, the rest can generally be worked on independently. So treat this plan as a roadmap rather than a strict dependency chain!
 
-As of Fall 2026, Phase 1—JavaScript/Reeborg API Execution (onload/pre/post) with Stubs—has been implemented.
+As of Fall 2026, progress has been made toward implementing Phase 1: JavaScript/Reeborg API Execution (onload/pre/post) with Stubs.
 
 ## The Phases
 
