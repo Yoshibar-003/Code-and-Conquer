@@ -5,9 +5,11 @@ One of the goals of Code and Conquer is to be able to open any of the Introducti
 
 The Fall 2026 team has developed a six-phase implementation plan to implement the required features to support this. The modular approach should allow you to make incremental progress without encountering blocking dependencies.
 
-As of Fall 2026, Phase 1—JavaScript/Reeborg API Execution (onload/pre/post) with Stubs—has been implemented.
-
 This document describes the six-phase plan to assist current and future developers of Code and Conquer. You're encouraged to modify the implementation plan as you see appropriate!
+
+Note: Phase 1—JavaScript/Reeborg API Execution (onload/pre/post)—is prioritized, as without JS execution and correct data propagation, everything else would be built on a broken foundation. After Phase 1, the rest can generally be worked on independently. So treat this plan as a roadmap rather than a strict dependency chain!
+
+As of Fall 2026, Phase 1—JavaScript/Reeborg API Execution (onload/pre/post) with Stubs—has been implemented.
 
 ## The Phases
 
