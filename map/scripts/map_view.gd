@@ -37,6 +37,18 @@ var camera_bounds_ready := false
 var camera_dragging := false
 var _pending_camera_restore: Dictionary = {}
 var backdrop: Node2D
+# Bumped every time objects are rebuilt so views (e.g., flat_grid_view) know
+# when object_data changed and a redraw is needed.
+var objects_version := 0
+# Precomputed per-level lookups, rebuilt in build_level(). Keys are Vector2i
+# grid coords so hot queries avoid string formatting. NOTE: level_data["walls"]
+# is intentionally NOT cached here — it can be mutated at runtime.
+var _goal_cells := {}   # Vector2i -> true
+var _void_cells := {}   # Vector2i -> true
+# Texture/font caches so spawning objects doesn't hit the resource loader each time.
+var _object_textures := {}
+var _goal_textures := {}
+var _count_font = null
 # =======================================
 
 
@@ -186,6 +198,7 @@ func build_level(data: Dictionary) -> void:
 	object_data = {}
 	for _k in data.get("objects", {}).keys():
 		object_data[_k] = (data["objects"][_k] as Dictionary).duplicate()
+	_rebuild_lookups(data)
 	rotation_state = 0
 	# IF NEEDED: enforce ordering
 	FloorTiles.z_index = 0
@@ -261,10 +274,39 @@ func _rotate_world():
 	else:
 		push_warning("JSON loaded, but 'cols' or 'rows' keys were missing!")
 
+## Precompute wall-direction, goal-cell and void-tile lookups once per level so
+## per-command queries (is_move_blocked, is_at_goal, is_void) stay O(1).
+## Keys are Vector2i logical grid coords, which are rotation-independent.
+func _rebuild_lookups(data: Dictionary) -> void:
+	_goal_cells.clear()
+	_void_cells.clear()
+
+	var void_tiles = data.get("void_tiles", {})
+	if void_tiles is Dictionary:
+		for key in void_tiles:
+			if void_tiles[key] != true:
+				continue
+			var parts := str(key).split(",")
+			if parts.size() == 2 and parts[0].is_valid_int() and parts[1].is_valid_int():
+				_void_cells[Vector2i(int(parts[0]), int(parts[1]))] = true
+
+	if data.has("goal"):
+		var goal = data["goal"]
+		if goal is Dictionary:
+			if goal.has("possible_final_positions"):
+				for pos in goal["possible_final_positions"]:
+					if typeof(pos) == TYPE_ARRAY and pos.size() >= 2:
+						_goal_cells[Vector2i(int(pos[0]), int(pos[1]))] = true
+			if goal.has("position"):
+				var pos = goal["position"]
+				if typeof(pos) == TYPE_DICTIONARY:
+					_goal_cells[Vector2i(int(pos.get("x", -1)), int(pos.get("y", -1)))] = true
+
+
 # ====== World Rendering Functions ======
 
 ## Rotate a 0-based floor cell for the current camera angle.
-## Uses cols and rows separately so non-square grids (e.g. 6x10) stay aligned.
+## Uses cols and rows separately so non-square grids (e.g., 6x10) stay aligned.
 func _rotate_floor_cell(x: int, y: int, cols: int, rows: int) -> Vector2i:
 	match rotation_state:
 		1:
