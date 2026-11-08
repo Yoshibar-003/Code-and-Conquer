@@ -2137,6 +2137,12 @@ func _on_editor_text_changed() -> void:
 	if not _ipc_active:
 		run_button.disabled = true
 	checked_cpp_executable = ""
+	# Edits can shift line numbers, so a tracked highlight may point at the
+	# wrong line. Clear all line colors once while a highlight is active.
+	if _highlighted_line >= 0:
+		for i in range(editor.get_line_count()):
+			editor.set_line_background_color(i, Color(0, 0, 0, 0))
+		_highlighted_line = -1
 
 func _on_check_button_pressed() -> void:
 	if _ipc_active:
