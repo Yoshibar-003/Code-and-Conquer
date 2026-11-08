@@ -49,6 +49,11 @@ var _trail_gy: int    = -1
 var _trail_facing: String = ""
 var show_command_trail := true
 
+# Redraw is expensive (full-grid draw calls), so _process only flags a redraw
+# when something actually changed instead of queue_redraw() every frame.
+var _dirty := true
+var _last_objects_version := -1
+
 
 func _ready() -> void:
 	var config := ConfigFile.new()
@@ -69,6 +74,8 @@ func setup(map_instance: Node, player: Node) -> void:
 	_trail_gx = -1
 	_trail_gy = -1
 	_trail_facing = ""
+	_dirty = true
+	_last_objects_version = -1
 	if player != null:
 		_record_trail(player.grid_x, player.grid_y, player.facing)
 	call_deferred("_fit_camera")
@@ -107,6 +114,7 @@ func rebuild_trail(positions: Array) -> void:
 	_trail_gx = -1
 	_trail_gy = -1
 	_trail_facing = ""
+	_dirty = true
 	for p in positions:
 		_record_trail(int(p.gx), int(p.gy), String(p.facing))
 	queue_redraw()
@@ -144,13 +152,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
+	# State tracking runs even while hidden so the trail stays correct and a
+	# pending redraw is not lost; the redraw itself only happens when visible.
 	if _player_ref != null:
 		var gx: int        = _player_ref.grid_x
 		var gy: int        = _player_ref.grid_y
 		var facing: String = _player_ref.facing
 		if gx != _trail_gx or gy != _trail_gy or facing != _trail_facing:
 			_record_trail(gx, gy, facing)
-	if visible:
+			_dirty = true
+	if _map_ref != null:
+		var version = _map_ref.get("objects_version")
+		if version != _last_objects_version:
+			_last_objects_version = version
+			_dirty = true
+	if _dirty and visible:
+		_dirty = false
 		queue_redraw()
 
 
