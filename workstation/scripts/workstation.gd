@@ -120,6 +120,7 @@ signal _resume
 
 var current_line_offset: int = 0
 var _is_handling_lose: bool = false
+var _highlighted_line: int = -1
 
 var global_level_name := ""
 var exec_speed: float = 0.5
@@ -842,13 +843,17 @@ func _highlight_editor_line(line: int) -> void:
 
 	if adjusted >= 0 and adjusted < editor.get_line_count():
 		editor.set_line_background_color(adjusted, Color(0.30, 0.60, 0.30, 0.25))
+		_highlighted_line = adjusted
 		editor.set_caret_line(adjusted)
 		editor.center_viewport_to_caret()
 
 
 func _clear_editor_highlights() -> void:
-	for i in range(editor.get_line_count()):
-		editor.set_line_background_color(i, Color(0, 0, 0, 0))
+	# Only one line is ever highlighted at a time, so clear just that line
+	# instead of iterating every line in the file on each command.
+	if _highlighted_line >= 0 and _highlighted_line < editor.get_line_count():
+		editor.set_line_background_color(_highlighted_line, Color(0, 0, 0, 0))
+	_highlighted_line = -1
 
 
 func _on_reset_button_pressed() -> void:
