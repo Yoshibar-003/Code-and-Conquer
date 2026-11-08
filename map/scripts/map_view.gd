@@ -932,6 +932,7 @@ func object_grid_position(x_pos: int, y_pos: int) -> Vector2:
 
 func _build_objects() -> void:
 	_clear_children(objects_node)
+	objects_version += 1
 	
 	# Render goal-object outlines first so actual objects draw on top
 	_build_goal_object_markers()
@@ -960,7 +961,12 @@ func _build_objects() -> void:
 
 func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var sprite := Sprite2D.new()
-	var tex := load("res://assets/objects/" + object_name + ".png") as Texture2D
+	var tex: Texture2D
+	if _object_textures.has(object_name):
+		tex = _object_textures[object_name]
+	else:
+		tex = load("res://assets/objects/" + object_name + ".png") as Texture2D
+		_object_textures[object_name] = tex
 	if tex != null:
 		sprite.texture = tex
 		# Old object art was tiny, while the new token icon is high-resolution.
@@ -1005,7 +1011,12 @@ func _build_goal_object_markers() -> void:
 ## satisfied = the matching object has already been placed here.
 func _spawn_goal_marker(object_name: String, gx: int, gy: int, satisfied: bool) -> void:
 	var sprite := Sprite2D.new()
-	var tex = load("res://assets/objects/" + object_name + "_goal.png")
+	var tex: Texture2D
+	if _goal_textures.has(object_name):
+		tex = _goal_textures[object_name]
+	else:
+		tex = load("res://assets/objects/" + object_name + "_goal.png") as Texture2D
+		_goal_textures[object_name] = tex
 	if tex:
 		sprite.texture = tex
 	sprite.scale = Vector2(4.8, 4.8)
@@ -1055,9 +1066,10 @@ func _make_count_label(text: String, world_pos: Vector2, color: Color) -> Label:
 	label.text = text
 	label.position = world_pos
 
-	var font = load(LABEL_FONT_PATH)
-	if font:
-		label.add_theme_font_override("font", font)
+	if _count_font == null:
+		_count_font = load(LABEL_FONT_PATH)
+	if _count_font:
+		label.add_theme_font_override("font", _count_font)
 
 	label.add_theme_font_size_override("font_size", 100)
 	label.add_theme_color_override("font_color", color)
