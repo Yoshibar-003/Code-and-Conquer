@@ -189,9 +189,8 @@ func _update_camera_pan_bounds() -> void:
 
 # ======= MAIN POINT: Build Rendition =======
 ## Builds a world given that JSON data (format: Reborg)
-##
-## INPUTS: A dictonary that describe the world (obj:description)
-## OUTPUS: A render of the world given by dictionary
+## Input:  A dictonary that describe the world (obj:description)
+## Output: A render of the world given by dictionary
 func build_level(data: Dictionary) -> void:
 	is_rotating = false
 	level_data = data
