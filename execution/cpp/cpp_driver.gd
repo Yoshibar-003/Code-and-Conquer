@@ -9,6 +9,9 @@ const Paths = preload("res://execution/shared/paths.gd")
 
 var _commands = preload(Paths.ROBOT_COMMANDS).new()
 var _active_build_dir: String = ""
+# -1 = not probed yet, 0 = unavailable, 1 = available. Probing spawns g++ --version,
+# so the result is cached for the session instead of on every check/run.
+var _available_cache := -1
 
 func _get_exe_path() -> String:
 	var base := _active_build_dir.path_join("student_program")
@@ -31,8 +34,10 @@ func prepare_build_files(source: String, port: int, token: String, sandbox_path:
 	_write_file(build_dir.path_join("robot_runtime.cpp"), runtime_source)
 
 func is_available() -> bool:
-	var output: Array = []
-	return OS.execute("g++", ["--version"], output, true) == 0
+	if _available_cache == -1:
+		var output: Array = []
+		_available_cache = 1 if OS.execute("g++", ["--version"], output, true) == 0 else 0
+	return _available_cache == 1
 
 func compile_program() -> Dictionary:
 	var output: Array = []

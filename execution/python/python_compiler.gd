@@ -6,6 +6,9 @@ extends RefCounted
 
 const Paths = preload("res://execution/shared/paths.gd")
 var _commands = preload(Paths.ROBOT_COMMANDS).new()
+# _find_python spawns up to 4 probe processes, so the result is cached.
+var _python_info_cache := {}
+var _python_info_searched := false
 
 func prepare_sandbox_files(
 	player_code: String,
@@ -72,6 +75,9 @@ func is_available() -> bool:
 	return not _find_python().is_empty()
 
 func _find_python() -> Dictionary:
+	if _python_info_searched:
+		return _python_info_cache
+	_python_info_searched = true
 	var candidates: Array[Dictionary] = [
 		{ "exe": "python3", "args": [] },
 		{ "exe": "python",  "args": [] },
@@ -83,5 +89,7 @@ func _find_python() -> Dictionary:
 		var args: Array = candidate.get("args", []).duplicate()
 		args.append("--version")
 		if OS.execute(str(candidate.get("exe", "")), args, out, true) == 0:
+			_python_info_cache = candidate
 			return candidate
+	_python_info_cache = {}
 	return {}
