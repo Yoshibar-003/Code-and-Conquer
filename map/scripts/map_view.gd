@@ -741,7 +741,7 @@ func is_in_bounds(gx: int, gy: int) -> bool:
 
 
 func is_void(gx: int, gy: int) -> bool:
-	return preload("res://map/scripts/void_tiles.gd").contains(level_data, gx, gy)
+	return _void_cells.has(Vector2i(gx, gy))
 
 ## Check if movement in dir from (gx,gy) is blocked by a wall.
 ## Walls are stored as "east" and "north" only (Reborg format).
@@ -797,23 +797,11 @@ func _cell_key(gx: int, gy: int) -> String:
 
 func get_rotation_step() -> int:
 	return rotation_state
+
 # Returns true if the given grid position satisfies the goal condition.
 # Used by the IPC query system without emitting the win signal.
 func is_at_goal(gx: int, gy: int) -> bool:
-	if not level_data.has("goal"):
-		return false
-	var goal = level_data["goal"]
-	if goal.has("possible_final_positions"):
-		for pos in goal["possible_final_positions"]:
-			if typeof(pos) == TYPE_ARRAY and pos.size() >= 2:
-				if int(pos[0]) == gx and int(pos[1]) == gy:
-					return true
-	if goal.has("position"):
-		var pos = goal["position"]
-		if typeof(pos) == TYPE_DICTIONARY:
-			if int(pos.get("x", -1)) == gx and int(pos.get("y", -1)) == gy:
-				return true
-	return false
+	return _goal_cells.has(Vector2i(gx, gy))
 
 # === win condition ===
 # Returns true when every required object is present at its goal cell
