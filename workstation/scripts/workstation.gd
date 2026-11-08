@@ -1094,7 +1094,10 @@ func _cleanup_sandbox_run() -> void:
 			_sandbox_cleanup_token = ""
 			return
 
-		OS.delay_msec(250)
+		# Async sleep so retries don't freeze the main thread. If the tree is
+		# shutting down (window close), the timer may never fire, which is
+		# fine since the process is exiting anyway.
+		await get_tree().create_timer(0.25).timeout
 
 	log_warning(
 		"Could not remove secure run folder after retries: "
