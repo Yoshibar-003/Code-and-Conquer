@@ -639,7 +639,7 @@ stretch = true
 transparent_bg = true
 handle_input_locally = false
 size = Vector2i(1254, 1013)
-render_target_update_mode = 4
+render_target_update_mode = 3  ; UPDATE_WHEN_PARENT_VISIBLE, don't render when hidden behind overlays (for performance)
 
 [node name="SettingsOverlay" type="Control" parent="." unique_id=2000000002]
 visible = false
