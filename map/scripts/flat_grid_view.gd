@@ -56,9 +56,11 @@ var _last_objects_version := -1
 
 
 func _ready() -> void:
-	var config := ConfigFile.new()
-	if config.load("user://settings.cfg") == OK:
-		show_command_trail = bool(config.get_value("learning", "show_command_trail", true))
+	# /root lookup instead of the autoload identifier so this script also
+	# works when instantiated outside a normal project run (e.g. tests).
+	var settings := get_node_or_null("/root/SettingsManager")
+	if settings != null:
+		show_command_trail = bool(settings.get_setting("learning", "show_command_trail", true))
 	_camera = Camera2D.new()
 	_camera.enabled = false
 	add_child(_camera)

@@ -61,34 +61,18 @@ func _on_fullscreen_toggled(enabled: bool) -> void:
 
 	_save_settings()
 func _load_settings() -> void:
-	var config := ConfigFile.new()
-
-	if config.load(SETTINGS_PATH) == OK:
-		volume_slider.value = float(config.get_value("audio", "master_volume", 1.0))
-		music_slider.value = float(config.get_value("audio", "music_volume", 1.0))
-		sfx_slider.value = float(config.get_value("audio", "sfx_volume", 1.0))
-		fullscreen_check.button_pressed = bool(config.get_value("display", "fullscreen", false))
-		ui_scale_option.select(int(config.get_value("display", "ui_scale", 1)))
-		code_font_size_option.select(int(config.get_value("editor", "font_size", 1)))
-		editor_theme_option.select(int(config.get_value("editor", "theme", 0)))
-		animation_speed_option.select(int(config.get_value("gameplay", "animation_speed", 0)))
-		grid_coordinates_check.button_pressed = bool(config.get_value("learning", "show_grid_coordinates", false))
-		command_trail_check.button_pressed = bool(config.get_value("learning", "show_command_trail", true))
-		beginner_hints_check.button_pressed = bool(config.get_value("learning", "beginner_hints", true))
-		default_language_option.select(int(config.get_value("editor", "default_language", 0)))
-	else:
-		volume_slider.value = 1.0
-		music_slider.value = 1.0
-		sfx_slider.value = 1.0
-		fullscreen_check.button_pressed = false
-		ui_scale_option.select(1)
-		code_font_size_option.select(1)
-		editor_theme_option.select(0)
-		animation_speed_option.select(0)
-		grid_coordinates_check.button_pressed = false
-		command_trail_check.button_pressed = true
-		beginner_hints_check.button_pressed = true
-		default_language_option.select(0)
+	volume_slider.value = float(SettingsManager.get_setting("audio", "master_volume", 1.0))
+	music_slider.value = float(SettingsManager.get_setting("audio", "music_volume", 1.0))
+	sfx_slider.value = float(SettingsManager.get_setting("audio", "sfx_volume", 1.0))
+	fullscreen_check.button_pressed = bool(SettingsManager.get_setting("display", "fullscreen", false))
+	ui_scale_option.select(int(SettingsManager.get_setting("display", "ui_scale", 1)))
+	code_font_size_option.select(int(SettingsManager.get_setting("editor", "font_size", 1)))
+	editor_theme_option.select(int(SettingsManager.get_setting("editor", "theme", 0)))
+	animation_speed_option.select(int(SettingsManager.get_setting("gameplay", "animation_speed", 0)))
+	grid_coordinates_check.button_pressed = bool(SettingsManager.get_setting("learning", "show_grid_coordinates", false))
+	command_trail_check.button_pressed = bool(SettingsManager.get_setting("learning", "show_command_trail", true))
+	beginner_hints_check.button_pressed = bool(SettingsManager.get_setting("learning", "beginner_hints", true))
+	default_language_option.select(int(SettingsManager.get_setting("editor", "default_language", 0)))
 
 	_apply_settings()
 

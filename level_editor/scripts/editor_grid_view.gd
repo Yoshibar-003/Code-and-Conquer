@@ -48,9 +48,11 @@ func _draw_icon(texture: Texture2D, center: Vector2, icon_size := 32.0) -> void:
 
 
 func _ready() -> void:
-	var config := ConfigFile.new()
-	if config.load("user://settings.cfg") == OK:
-		show_coordinates = bool(config.get_value("learning", "show_grid_coordinates", false))
+	# /root lookup instead of the autoload identifier: this is a class_name
+	# script and may compile before autoload singletons register.
+	var settings := get_node_or_null("/root/SettingsManager")
+	if settings != null:
+		show_coordinates = bool(settings.get_setting("learning", "show_grid_coordinates", false))
 
 
 func set_document(value: LevelDocument) -> void:

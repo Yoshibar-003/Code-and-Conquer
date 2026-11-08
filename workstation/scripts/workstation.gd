@@ -342,10 +342,7 @@ func _apply_saved_preferences() -> void:
 
 
 func _saved_setting(section: String, key: String, fallback):
-	var config := ConfigFile.new()
-	if config.load("user://settings.cfg") == OK:
-		return config.get_value(section, key, fallback)
-	return fallback
+	return SettingsManager.get_setting(section, key, fallback)
 
 
 func _refresh_campaign_instructions() -> void:
