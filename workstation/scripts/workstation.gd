@@ -111,6 +111,7 @@ var _ipc_loop_running: bool = false
 # === step history for step back ===
 var _cmd_history: Array = []	# [{cmd, src_line, snap}] - snap is state before the cmd ran
 var _step_index: int = 0		# how many commands the user has seen
+var _moves_used_count: int = 0	# MOVE commands within _cmd_history[0.._step_index)
 var _in_replay: bool = false	# true when replaying from history
 
 # === pause state ===
@@ -564,6 +565,7 @@ func _on_language_changed(index: int) -> void:
 	current_language = Language.CPP if index == 0 else Language.PYTHON
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 	_refresh_level_limits()
 	output_box.clear()
@@ -709,6 +711,8 @@ func _resume_after_step_back(run_id: int) -> void:
 	while _step_index < _cmd_history.size() and _ipc_active and _run_id == run_id:
 		var entry = _cmd_history[_step_index]
 		_step_index += 1
+		if entry.cmd == "MOVE":
+			_moves_used_count += 1
 		await _animate_command(entry.cmd, entry.src_line, run_id)
 		if _run_id != run_id or not _ipc_active:
 			return
@@ -759,6 +763,8 @@ func _on_prev_button_pressed() -> void:
 		return
 
 	_step_index -= 1
+	if _cmd_history[_step_index].cmd == "MOVE":
+		_moves_used_count -= 1
 	_in_replay = true
 	_restore_snapshot(_cmd_history[_step_index].snap)
 	_refresh_level_limits()
@@ -811,6 +817,8 @@ func _restore_snapshot(snap: Dictionary) -> void:
 func _replay_step_forward(run_id: int) -> void:
 	var entry = _cmd_history[_step_index]
 	_step_index += 1
+	if entry.cmd == "MOVE":
+		_moves_used_count += 1
 	await _animate_command(entry.cmd, entry.src_line, run_id)
 	if _run_id != run_id or not _ipc_active:
 		return
@@ -848,6 +856,7 @@ func _on_reset_button_pressed() -> void:
 	_clear_editor_highlights()
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 	run_button.text = "▶ Run"
 	run_button.disabled = false
@@ -1201,11 +1210,7 @@ func _animate_command(cmd: String, src_line: int, run_id: int, live: bool = fals
 
 
 func _moves_used() -> int:
-	var count := 0
-	for i in range(mini(_step_index, _cmd_history.size())):
-		if _cmd_history[i].cmd == "MOVE":
-			count += 1
-	return count
+	return _moves_used_count
 
 
 func _refresh_level_limits() -> void:
@@ -1247,6 +1252,7 @@ func _run_pipeline() -> void:
 	log_header("run")
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 	_refresh_level_limits()
 	_run_outcome = "incomplete"
@@ -1495,6 +1501,8 @@ func _run_ipc_loop(run_id: int) -> void:
 			var snap = _take_snapshot()
 			_cmd_history.append({cmd = cmd, src_line = src_line, snap = snap})
 			_step_index = _cmd_history.size()
+			if cmd == "MOVE":
+				_moves_used_count += 1
 
 			await _animate_command(cmd, src_line, run_id, true)
 
