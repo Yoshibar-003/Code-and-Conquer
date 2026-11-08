@@ -484,59 +484,63 @@ func _build_walls(data: Dictionary, cols: int, rows: int) -> void:
 					
 					grid_pos = Vector2(temp_pos[0], temp_pos[1]+1)
 					WallTiles.set_cell(grid_pos, 44, Vector2i(6,1))
-				
-			#Add a corner
-			if rotation_state == 1:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]+1))
-					if other_wall == Vector2i(6,1):
-						var corner_pos = Vector2i(cell[0]-1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(3,2))
-			elif rotation_state == 2:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]+1))
-					if other_wall == Vector2i(5,1):
-						var corner_pos = Vector2i(cell[0]+1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(1,2))
-			elif rotation_state == 3:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]-1))
-					if other_wall == Vector2i(5,1):
-						var corner_pos = Vector2i(cell[0]+1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(0,2))
-			else:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]-1))
-					if other_wall == Vector2i(6,1):
-						var corner_pos = Vector2i(cell[0]-1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(2,2))
 
+		_place_wall_corners()
 	else:
 		push_warning("JSON loaded, but 'walls' keys were missing!")
+
+
+## Places wall corner/junction tiles in a single pass after all wall segments are set.
+func _place_wall_corners() -> void:
+	# Add a corner
+	if rotation_state == 1:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]+1))
+			if other_wall == Vector2i(6,1):
+				var corner_pos = Vector2i(cell[0]-1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(3,2))
+	elif rotation_state == 2:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]+1))
+			if other_wall == Vector2i(5,1):
+				var corner_pos = Vector2i(cell[0]+1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(1,2))
+	elif rotation_state == 3:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]-1))
+			if other_wall == Vector2i(5,1):
+				var corner_pos = Vector2i(cell[0]+1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(0,2))
+	else:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]-1))
+			if other_wall == Vector2i(6,1):
+				var corner_pos = Vector2i(cell[0]-1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(2,2))
 
 func _build_goal_cells(data: Dictionary, cols: int, rows: int) -> void:
 	if not data.has("goal"):
