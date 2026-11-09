@@ -1,0 +1,8 @@
+{
+  "name": "Broken JSON Test",
+  "cols": 5,
+  "rows": 5,
+  "robots": [ { "x": 1, "y": 1, "_orientation": 0, "objects": {} } ],
+  "walls": {},
+  "goal": { "possible_final_positions": [[5, 5]], "objects": {} },
+  "description": [ "This file is missing a closing bracket on purpose." ]
