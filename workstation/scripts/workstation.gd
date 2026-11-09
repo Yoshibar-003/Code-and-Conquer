@@ -170,11 +170,9 @@ var _student_output_lines := 0
 func _ready() -> void:
 	# Kill any subprocess left over from a previous session that was force-closed.
 	# auto_accept_quit disabled so _notification can clean up before Godot exits.
+	# Deferred so the blocking OS.execute doesn't delay scene setup.
 	get_tree().set_auto_accept_quit(false)		# required for _notification to intercept window close
-	if OS.get_name() == "Windows":
-		OS.execute("taskkill", ["/F", "/IM", "student_program.exe"], [], true)
-	else:
-		OS.execute("pkill", ["-f", "student_program"], [], true)
+	call_deferred("_kill_stale_student_program")
 
 	_set_status("Ready", "")
 
@@ -242,6 +240,13 @@ func _ready() -> void:
 
 	await get_tree().process_frame
 	_load_level_scene(true)
+
+func _kill_stale_student_program() -> void:
+	if OS.get_name() == "Windows":
+		OS.execute("taskkill", ["/F", "/IM", "student_program.exe"], [], true)
+	else:
+		OS.execute("pkill", ["-f", "student_program"], [], true)
+
 
 func _compile_cpp_in_background(source: String, build_dir: String) -> Dictionary:
 	var background_compiler = preload(Paths.CPP_DRIVER).new()
