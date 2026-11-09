@@ -1635,11 +1635,9 @@ func _execute_cmd(cmd: String, src_line: int) -> void:
 			var move_done := [false]
 			player_node.move_finished.connect(func(): move_done[0] = true, CONNECT_ONE_SHOT)
 			player_node.move_forward(exec_speed)
-			var waited := 0.0
-			var move_timeout := exec_speed * 3.0 + 0.5
-			while is_instance_valid(player_node) and _ipc_active and not move_done[0] and waited < move_timeout:
-				await get_tree().create_timer(0.05).timeout
-				waited += 0.05
+			var move_timeout := get_tree().create_timer(exec_speed * 3.0 + 0.5)
+			while is_instance_valid(player_node) and _ipc_active and not move_done[0] and move_timeout.time_left > 0.0:
+				await get_tree().process_frame
 			if _ipc_active and is_instance_valid(player_node) and not move_done[0]:
 				# The move never finished (stuck/killed tween). Treat it as a
 				# failed run rather than acknowledging the command and letting
