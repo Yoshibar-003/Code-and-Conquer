@@ -49,6 +49,9 @@ var _wall_faces := {}   # Vector2i -> Array[String] of lowercased faces
 var _object_textures := {}
 var _goal_textures := {}
 var _count_font = null
+# cell_key -> Array[Node] index of spawned object sprites/labels, so per-cell
+# refresh only touches that cell's nodes instead of scanning objects_node.
+var _objects_by_cell := {}
 # =======================================
 
 
@@ -939,6 +942,7 @@ func object_grid_position(x_pos: int, y_pos: int) -> Vector2:
 
 func _build_objects() -> void:
 	_clear_children(objects_node)
+	_objects_by_cell.clear()
 	objects_version += 1
 	
 	var keys := {}
@@ -990,11 +994,17 @@ func _spawn_cell_objects(key: String) -> void:
 ## Rebuilds only the sprites/labels for one cell. Used by pick/place so a
 ## command doesn't respawn every object on the map.
 func _refresh_cell_objects(key: String) -> void:
-	for child in objects_node.get_children():
-		if child.get_meta("cell_key", "") == key:
-			child.free()
+	for child in _objects_by_cell.get(key, []):
+		child.free()
+	_objects_by_cell.erase(key)
 	_spawn_cell_objects(key)
 	objects_version += 1
+
+## Registers a freshly spawned node under its cell key for per-cell refresh.
+func _track_cell_node(node: Node, key: String) -> void:
+	if not _objects_by_cell.has(key):
+		_objects_by_cell[key] = []
+	_objects_by_cell[key].append(node)
 
 func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var sprite := Sprite2D.new()
@@ -1018,6 +1028,7 @@ func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	sprite.z_index = 0
 	sprite.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(sprite)
+	_track_cell_node(sprite, _cell_key(gx, gy))
 
 
 ## Spawns a single outlined diamond at a goal cell.
@@ -1044,6 +1055,7 @@ func _spawn_goal_marker(object_name: String, gx: int, gy: int, satisfied: bool) 
 	sprite.z_index = 0
 	sprite.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(sprite)
+	_track_cell_node(sprite, _cell_key(gx, gy))
 
 
 ## Adds a count label to a regular object tile.
@@ -1061,6 +1073,7 @@ func _add_object_count_label(gx: int, gy: int, tile_objects: Dictionary) -> void
 	var label := _make_count_label(text, center + Vector2(18, 28), Color(0.0, 0.0, 0.0, 1.0))
 	label.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(label)
+	_track_cell_node(label, _cell_key(gx, gy))
 
 
 ## Adds have/needed labels to a goal marker tile.
@@ -1075,6 +1088,8 @@ func _add_goal_count_label(gx: int, gy: int, have: int, needed: int) -> void:
 	needed_label.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(have_label)
 	objects_node.add_child(needed_label)
+	_track_cell_node(have_label, _cell_key(gx, gy))
+	_track_cell_node(needed_label, _cell_key(gx, gy))
 
 
 ## Creates a styled Label at world_pos with the given text and colour.
