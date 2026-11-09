@@ -96,8 +96,10 @@ func run_tests() -> void:
 	check(station._answer_query("RIGHT_IS_CLEAR") == "true", "Right sensor must not detect voids")
 	station.player_node.facing = "east"
 	world.level_data.walls["2,2"] = ["east"]
+	world.invalidate_lookups()
 	check(station._answer_query("FRONT_IS_CLEAR") == "false", "Walls still block sensors")
 	world.level_data.walls.clear()
+	world.invalidate_lookups()
 	await station.player_node.move_forward(0.001)
 	check(station.lose_overlay.visible, "Moving into void must lose")
 	# In headless runs the audio driver never finishes a playback, so each

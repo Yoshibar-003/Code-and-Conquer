@@ -41,10 +41,10 @@ var backdrop: Node2D
 # when object_data changed and a redraw is needed.
 var objects_version := 0
 # Precomputed per-level lookups, rebuilt in build_level(). Keys are Vector2i
-# grid coords so hot queries avoid string formatting. NOTE: level_data["walls"]
-# is intentionally NOT cached here — it can be mutated at runtime.
+# grid coords so hot queries avoid string formatting.
 var _goal_cells := {}   # Vector2i -> true
 var _void_cells := {}   # Vector2i -> true
+var _wall_faces := {}   # Vector2i -> Array[String] of lowercased faces
 # Texture/font caches so spawning objects doesn't hit the resource loader each time.
 var _object_textures := {}
 var _goal_textures := {}
@@ -279,6 +279,17 @@ func _rotate_world():
 func _rebuild_lookups(data: Dictionary) -> void:
 	_goal_cells.clear()
 	_void_cells.clear()
+	_wall_faces.clear()
+
+	var walls = data.get("walls", {})
+	if walls is Dictionary:
+		for key in walls:
+			var parts := str(key).split(",")
+			if parts.size() == 2 and parts[0].is_valid_int() and parts[1].is_valid_int():
+				var faces: Array[String] = []
+				for face in walls[key]:
+					faces.append(str(face).to_lower())
+				_wall_faces[Vector2i(int(parts[0]), int(parts[1]))] = faces
 
 	var void_tiles = data.get("void_tiles", {})
 	if void_tiles is Dictionary:
@@ -743,6 +754,12 @@ func is_in_bounds(gx: int, gy: int) -> bool:
 func is_void(gx: int, gy: int) -> bool:
 	return _void_cells.has(Vector2i(gx, gy))
 
+## Rebuilds the cached lookups from the current level_data. Call this after
+## mutating level_data["walls"] (or goal/void tiles) at runtime.
+func invalidate_lookups() -> void:
+	_rebuild_lookups(level_data)
+
+
 ## Check if movement in dir from (gx,gy) is blocked by a wall.
 ## Walls are stored as "east" and "north" only (Reborg format).
 ## Moving west/south requires checking the adjacent cell's east/north wall.
@@ -760,34 +777,24 @@ func is_move_blocked(gx: int, gy: int, dir: String) -> bool:
 	if not is_in_bounds(next_x, next_y):
 		return true
 	
-	# Check if wall even exist
-	if not level_data.has("walls"):
-		return false
-	
 	# Direct check: does this cell have a wall on this face?
 	# Covers "east" and "north" moves.
-	var key := "%d,%d" % [gx, gy]
-	if level_data["walls"].has(key):
-		for d in level_data["walls"][key]:
-			if str(d).to_lower() == dir:
-				return true
+	for face in _wall_faces.get(Vector2i(gx, gy), []):
+		if face == dir:
+			return true
 	
 	# Indirect check: moving west/south means checking the neighbour's east/north wall.
 	# A "west" wall on (gx,gy) is stored as an "east" wall on (gx-1,gy).
 	# A "south" wall on (gx,gy) is stored as a "north" wall on (gx,gy-1).
 	match dir:
 		"west":
-			var adj := "%d,%d" % [gx - 1, gy]
-			if level_data["walls"].has(adj):
-				for d in level_data["walls"][adj]:
-					if str(d).to_lower() == "east":
-						return true
+			for face in _wall_faces.get(Vector2i(gx - 1, gy), []):
+				if face == "east":
+					return true
 		"south":
-			var adj := "%d,%d" % [gx, gy - 1]
-			if level_data["walls"].has(adj):
-				for d in level_data["walls"][adj]:
-					if str(d).to_lower() == "north":
-						return true
+			for face in _wall_faces.get(Vector2i(gx, gy - 1), []):
+				if face == "north":
+					return true
 						
 	return false
 
@@ -934,30 +941,60 @@ func _build_objects() -> void:
 	_clear_children(objects_node)
 	objects_version += 1
 	
-	# Render goal-object outlines first so actual objects draw on top
-	_build_goal_object_markers()
-	
+	var keys := {}
+	if level_data.has("goal") and level_data["goal"].has("objects"):
+		for key in level_data["goal"]["objects"].keys():
+			keys[key] = true
 	for key in object_data.keys():
-		var parts = key.split(",")
-		if parts.size() != 2:
-			continue
+		keys[key] = true
+	for key in keys.keys():
+		_spawn_cell_objects(key)
 
-		var gx := int(parts[0])
-		var gy := int(parts[1])
 
-		var tile_objects: Dictionary = object_data[key]
+## Spawns goal markers, objects, and count labels for a single "x,y" cell key.
+## Shared by the full rebuild and the per-cell refresh used on pick/place.
+func _spawn_cell_objects(key: String) -> void:
+	var parts := key.split(",")
+	if parts.size() != 2:
+		return
+	var gx := int(parts[0])
+	var gy := int(parts[1])
 
-		for object_name in tile_objects.keys():
-			var count := int(tile_objects[object_name])
+	# Goal-object outlines first so actual objects draw on top
+	var is_goal_tile := false
+	if level_data.has("goal") and level_data["goal"].has("objects"):
+		var goal_objs: Dictionary = level_data["goal"]["objects"]
+		if goal_objs.has(key):
+			is_goal_tile = true
+			var required: Dictionary = goal_objs[key]
+			for obj_name in required:
+				var needed := int(required[obj_name])
+				var have := 0
+				if object_data.has(key) and object_data[key].has(obj_name):
+					have = int(object_data[key][obj_name])
+				for i in range(needed):
+					_spawn_goal_marker(obj_name, gx, gy, i < have)
+				_add_goal_count_label(gx, gy, have, needed)
 
-			for i in range(count):
-				_spawn_object(object_name, gx, gy)
+	if not object_data.has(key):
+		return
+	var tile_objects: Dictionary = object_data[key]
+	for object_name in tile_objects.keys():
+		var count := int(tile_objects[object_name])
+		for i in range(count):
+			_spawn_object(object_name, gx, gy)
+	if not is_goal_tile:
+		_add_object_count_label(gx, gy, tile_objects)
 
-		var is_goal_tile : bool = level_data.has("goal") \
-			and level_data["goal"].has("objects") \
-			and level_data["goal"]["objects"].has(key)
-		if not is_goal_tile:
-			_add_object_count_label(gx, gy, tile_objects)
+
+## Rebuilds only the sprites/labels for one cell. Used by pick/place so a
+## command doesn't respawn every object on the map.
+func _refresh_cell_objects(key: String) -> void:
+	for child in objects_node.get_children():
+		if child.get_meta("cell_key", "") == key:
+			child.free()
+	_spawn_cell_objects(key)
+	objects_version += 1
 
 func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var sprite := Sprite2D.new()
@@ -979,32 +1016,8 @@ func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var grid_pos = object_grid_position(gx, gy + 1)
 	sprite.position = Vector2i(int(grid_pos[0] + offset_x), int(grid_pos[1] + offset_y))
 	sprite.z_index = 0
+	sprite.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(sprite)
-
-
-## Renders outlined diamond markers for every object required by the level goal.
-## Unsatisfied slots show in the object's colour; satisfied slots turn green.
-## Called before actual objects so markers sit visually behind them.
-func _build_goal_object_markers() -> void:
-	if not level_data.has("goal") or not level_data["goal"].has("objects"):
-		return
-	var goal_objs: Dictionary = level_data["goal"]["objects"]
-	for key in goal_objs:
-		var parts = key.split(",")
-		if parts.size() != 2:
-			continue
-		var gx := int(parts[0])
-		var gy := int(parts[1])
-		var required: Dictionary = goal_objs[key]
-		for obj_name in required:
-			var needed := int(required[obj_name])
-			var have  := 0
-			if object_data.has(key) and object_data[key].has(obj_name):
-				have = int(object_data[key][obj_name])
-			for i in range(needed):
-				_spawn_goal_marker(obj_name, gx, gy, i < have)
-			
-			_add_goal_count_label(gx, gy, have, needed)
 
 
 ## Spawns a single outlined diamond at a goal cell.
@@ -1029,6 +1042,7 @@ func _spawn_goal_marker(object_name: String, gx: int, gy: int, satisfied: bool) 
 	var grid_pos = object_grid_position(gx, gy + 1)
 	sprite.position = Vector2i(int(grid_pos[0] + offset_x), int(grid_pos[1] + offset_y))
 	sprite.z_index = 0
+	sprite.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(sprite)
 
 
@@ -1045,6 +1059,7 @@ func _add_object_count_label(gx: int, gy: int, tile_objects: Dictionary) -> void
 
 	var text := "?" if is_mixed else str(total)
 	var label := _make_count_label(text, center + Vector2(18, 28), Color(0.0, 0.0, 0.0, 1.0))
+	label.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(label)
 
 
@@ -1056,6 +1071,8 @@ func _add_goal_count_label(gx: int, gy: int, have: int, needed: int) -> void:
 
 	var have_label := _make_count_label(str(have), center + Vector2(-72, 28), Color(0.0, 0.0, 0.0, 1.0))
 	var needed_label := _make_count_label(str(needed), center + Vector2(18, 28), Color(0.046, 0.649, 0.924, 1.0))
+	have_label.set_meta("cell_key", _cell_key(gx, gy))
+	needed_label.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(have_label)
 	objects_node.add_child(needed_label)
 
@@ -1114,7 +1131,7 @@ func remove_object_at(gx: int, gy: int) -> String:
 		if tile_objects.is_empty():
 			object_data.erase(key)
 
-		_build_objects()
+		_refresh_cell_objects(key)
 		return object_name
 
 	return ""
@@ -1132,7 +1149,7 @@ func place_object_at(gx: int, gy: int, object_name: String) -> void:
 		object_data[key][object_name] = 0
 
 	object_data[key][object_name] += 1
-	_build_objects()
+	_refresh_cell_objects(key)
 
 
 func tile_has_any_object(gx: int, gy: int) -> bool:
