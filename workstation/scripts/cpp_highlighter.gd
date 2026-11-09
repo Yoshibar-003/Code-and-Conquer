@@ -21,14 +21,21 @@ var _verified_upto := 0
 func _update_cache() -> void:
 	var editor := get_text_edit()
 	if editor != null:
-		# Programmatic `editor.text = ...` emits text_set, NOT text_changed, so
-		# both must clear our scan cache (because otherwise, stale colors would
-		# survive template loads).
+		# Programmatic `editor.text = ...` emits text_set, NOT text_changed, and
+		# some edits only surface via lines_edited_from — all three must clear
+		# our scan cache (otherwise, stale colors can survive template loads and
+		# language switches).
 		for sig in [editor.text_changed, editor.text_set]:
 			if not sig.is_connected(clear_highlighting_cache):
 				sig.connect(clear_highlighting_cache)
 			if not sig.is_connected(_clear_highlighting_cache):
 				sig.connect(_clear_highlighting_cache)
+		if not editor.lines_edited_from.is_connected(_on_lines_edited):
+			editor.lines_edited_from.connect(_on_lines_edited)
+	_clear_highlighting_cache()
+
+func _on_lines_edited(_from_line: int, _to_line: int) -> void:
+	clear_highlighting_cache()
 	_clear_highlighting_cache()
 
 func add_keyword_color(word: String, color: Color) -> void:

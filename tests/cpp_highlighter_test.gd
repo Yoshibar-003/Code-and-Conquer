@@ -68,6 +68,24 @@ func run_tests() -> void:
 	check(color_at(2, 0) == Color.CYAN, "Pasting must preserve following keyword colors")
 	await process_frame
 	check(color_at(1, 25) == highlighter.string_color, "Raw-string colors must remain correct after the edit signal")
+	# Regression: programmatic `editor.text = ...` emits text_set, NOT text_changed.
+	# Loading a shorter template after a long file must still invalidate the
+	# incremental _verified_upto cache without any manual clear.
+	var long_src := ""
+	for i in range(40):
+		long_src += "int filler%d = %d;\n" % [i, i]
+	long_src += "bool tail;"
+	editor.text = long_src
+	await process_frame
+	color_at(39, 0)
+	# Same-length reload: the shrink guard can't catch this, only the signals.
+	var reloaded := ""
+	for i in range(39):
+		reloaded += "int other%d = %d;\n" % [i, i]
+	reloaded += "bool tail;"
+	editor.text = reloaded
+	await process_frame
+	check(color_at(39, 0) == Color.CYAN, "Programmatic text reload must not serve stale colors")
 	editor.queue_free()
 	await process_frame
 	print("CPP HIGHLIGHTER TESTS: %d failures" % failures)
