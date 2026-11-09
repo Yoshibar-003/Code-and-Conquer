@@ -11,11 +11,24 @@ var _lines: Array[Dictionary] = []
 var _source_lines: Array[String] = []
 var _end := ""
 var _kind := ""
+# Leading lines already verified identical to the current document. Lines past
+# this point are re-checked lazily per request, so validation is amortized O(1)
+# per call instead of O(file length). text_changed still clears everything, so
+# a mid-edit change above this point can show stale colors for at most one
+# frame before the signal arrives.
+var _verified_upto := 0
 
 func _update_cache() -> void:
 	var editor := get_text_edit()
-	if editor != null and not editor.text_changed.is_connected(clear_highlighting_cache):
-		editor.text_changed.connect(clear_highlighting_cache)
+	if editor != null:
+		# Programmatic `editor.text = ...` emits text_set, NOT text_changed, so
+		# both must clear our scan cache (because otherwise, stale colors would
+		# survive template loads).
+		for sig in [editor.text_changed, editor.text_set]:
+			if not sig.is_connected(clear_highlighting_cache):
+				sig.connect(clear_highlighting_cache)
+			if not sig.is_connected(_clear_highlighting_cache):
+				sig.connect(_clear_highlighting_cache)
 	_clear_highlighting_cache()
 
 func add_keyword_color(word: String, color: Color) -> void:
@@ -26,13 +39,26 @@ func _clear_highlighting_cache() -> void:
 	_source_lines.clear()
 	_end = ""
 	_kind = ""
+	_verified_upto = 0
 
 func _get_line_syntax_highlighting(line: int) -> Dictionary:
+	# If the document shrank without a text_changed reaching us, cached lines
+	# past the end are stale, so clear the cache.
+	if _verified_upto > get_text_edit().get_line_count():
+		_clear_highlighting_cache()
 	# TextEdit can request colors during an edit, before text_changed arrives.
-	for previous in range(mini(_source_lines.size(), line + 1)):
-		if _source_lines[previous] != get_text_edit().get_line(previous):
-			_clear_highlighting_cache()
-			break
+	# Only lines at/after _verified_upto need re-checking; earlier lines were
+	# already proven identical on previous calls.
+	if line >= _verified_upto:
+		var check_upto := mini(_source_lines.size(), line + 1)
+		var diverged := false
+		for i in range(_verified_upto, check_upto):
+			if _source_lines[i] != get_text_edit().get_line(i):
+				_clear_highlighting_cache()
+				diverged = true
+				break
+		if not diverged:
+			_verified_upto = check_upto
 	while _lines.size() <= line:
 		var source := get_text_edit().get_line(_lines.size())
 		_lines.append(_scan(source))
