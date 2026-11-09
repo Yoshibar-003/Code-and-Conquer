@@ -121,6 +121,34 @@ func run_tests() -> void:
 		station.get_node("LoseSound").stop()
 		station._on_lose_retry()
 		await process_frame
+	# Snapshot epochs: non-mutating commands share one object_data copy, and a
+	# pick/place boundary forces the next snapshot to recopy the map.
+	world = station.game_instance
+	station._cmd_history.clear()
+	station._step_index = 0
+	station._moves_used_count = 0
+	station.player_node.grid_x = 4
+	station.player_node.grid_y = 4
+	station.player_node.carried_object = {}
+	world.object_data = {"4,4": {"token": 2}}
+	var snap_a = station._take_snapshot()
+	station.player_node.grid_x = 5
+	var snap_b = station._take_snapshot()
+	check(is_same(snap_a.object_data, snap_b.object_data), "Non-mutating snapshots must share the object_data copy")
+	# Simulate a pick: one token leaves the tile and enters the player's pack.
+	world.object_data = {"4,4": {"token": 1}}
+	station.player_node.carried_object = {"token": 1}
+	station._obj_snap_valid = false
+	var snap_c = station._take_snapshot()
+	check(not is_same(snap_a.object_data, snap_c.object_data), "Object mutation must force a fresh snapshot copy")
+	check(int(snap_c.object_data["4,4"]["token"]) == 1, "New epoch snapshot must see post-pick state")
+	# Stepping back to the first snapshot restores tile objects and carried items.
+	station._restore_snapshot(snap_a)
+	check(int(world.object_data["4,4"]["token"]) == 2, "Step back must restore pre-pick tile objects")
+	check(station.player_node.carried_object.is_empty(), "Step back must restore carried_object")
+	check(not station._obj_snap_valid, "Restore must invalidate the shared snapshot")
+	var snap_d = station._take_snapshot()
+	check(int(snap_d.object_data["4,4"]["token"]) == 2, "Post-restore snapshot must reflect restored state")
 	# Stop any playing audio before freeing so playbacks don't leak at exit.
 	for player in station.find_children("*", "AudioStreamPlayer", true, false):
 		player.stop()

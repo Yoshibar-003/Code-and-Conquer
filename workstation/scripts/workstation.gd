@@ -114,6 +114,12 @@ var _step_index: int = 0		# how many commands the user has seen
 var _moves_used_count: int = 0	# MOVE commands within _cmd_history[0.._step_index)
 var _in_replay: bool = false	# true when replaying from history
 
+# Shared object_data copy for the current mutation epoch. Only PICK_OBJECT and
+# PUT_OBJECT change object_data, so consecutive MOVE/TURN snapshots can all
+# reference the same dict instead of each duplicating the whole object map.
+var _obj_snap: Dictionary = {}
+var _obj_snap_valid := false
+
 # === pause state ===
 var _paused: bool = false
 signal _resume
@@ -148,6 +154,7 @@ var checked_cpp_line_offset := 0
 var _compile_thread: Thread
 
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
+const OBJECT_MUTATING_COMMANDS := ["PICK_OBJECT", "PUT_OBJECT"]
 const ALLOWED_IPC_QUERIES := [
 	"FRONT_IS_CLEAR",
 	"RIGHT_IS_CLEAR",
@@ -410,6 +417,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	for child in game_subviewport.get_children():
 		child.queue_free()
 	flat_grid_node = null
+	_obj_snap_valid = false
 
 	# create and attach the playable level scene
 	game_instance = level_scene_resource.instantiate()
@@ -717,6 +725,8 @@ func _resume_after_step_back(run_id: int) -> void:
 		if entry.cmd == "MOVE":
 			_moves_used_count += 1
 		await _animate_command(entry.cmd, entry.src_line, run_id)
+		if OBJECT_MUTATING_COMMANDS.has(entry.cmd):
+			_obj_snap_valid = false
 		if _run_id != run_id or not _ipc_active:
 			return
 		if _paused:
@@ -784,17 +794,18 @@ func _on_prev_button_pressed() -> void:
 
 
 func _take_snapshot() -> Dictionary:
-	var obj_copy: Dictionary = {}
-
-	for key in game_instance.object_data:
-		obj_copy[key] = game_instance.object_data[key].duplicate()
+	if not _obj_snap_valid:
+		_obj_snap = {}
+		for key in game_instance.object_data:
+			_obj_snap[key] = game_instance.object_data[key].duplicate()
+		_obj_snap_valid = true
 
 	return {
 		grid_x = player_node.grid_x,
 		grid_y = player_node.grid_y,
 		facing = player_node.facing,
 		carried_object = player_node.carried_object.duplicate(),
-		object_data = obj_copy
+		object_data = _obj_snap
 	}
 
 
@@ -810,6 +821,7 @@ func _restore_snapshot(snap: Dictionary) -> void:
 
 	player_node.update_animation(false)
 	game_instance.restore_object_data(snap.object_data)
+	_obj_snap_valid = false
 
 	if _step_index > 0:
 		_highlight_editor_line(_cmd_history[_step_index - 1].src_line)
@@ -823,6 +835,8 @@ func _replay_step_forward(run_id: int) -> void:
 	if entry.cmd == "MOVE":
 		_moves_used_count += 1
 	await _animate_command(entry.cmd, entry.src_line, run_id)
+	if OBJECT_MUTATING_COMMANDS.has(entry.cmd):
+		_obj_snap_valid = false
 	if _run_id != run_id or not _ipc_active:
 		return
 
@@ -1512,6 +1526,8 @@ func _run_ipc_loop(run_id: int) -> void:
 				_moves_used_count += 1
 
 			await _animate_command(cmd, src_line, run_id, true)
+			if OBJECT_MUTATING_COMMANDS.has(cmd):
+				_obj_snap_valid = false
 
 			if _run_id != run_id or not _ipc_active:
 				break
