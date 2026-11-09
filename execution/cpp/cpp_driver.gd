@@ -54,7 +54,7 @@ func compile_program() -> Dictionary:
 	if FileAccess.file_exists(exe):
 		DirAccess.remove_absolute(exe)
 	
-	var args := ["-std=c++17", "-Wall", "-Wextra"]
+	var args := ["-std=c++17", "-Wall", "-Wextra", "-s"]
 
 	if OS.get_name() == "Windows":
 		args.append("-static")
