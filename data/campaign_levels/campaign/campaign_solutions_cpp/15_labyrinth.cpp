@@ -7,7 +7,7 @@ void turn_right() {
 }
 
 int main() {
-    // Solve any maze: keep going until you reach the goal.
+    // Solve the maze, then put the token down on the goal.
     while (!at_goal()) {
         // Add your maze-solving logic here.
         if (right_is_clear()) {
@@ -19,5 +19,6 @@ int main() {
             turn_left();
         }
     }
+    put_object();
     return 0;
 }

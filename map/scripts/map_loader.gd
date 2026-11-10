@@ -3,13 +3,11 @@ extends RefCounted
 # === level definition ===
 # reads a JSON file from disk and returns a parsed level definition
 # used by level_scene.gd to build the playable level
-# this does NOT construct the scene, it only preps the data for building
 
-# neighbouring cells: east, west, north, south (y grows northward in this game)
+# neighbouring cells: east, west, north, south
 const MAZE_STEPS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
-# random mazes are generated once per loader, so pressing Reset keeps the same maze.
-# Leaving the level and opening it again makes a fresh one.
+# random mazes are generated once per loader, so pressing 'Reset' keeps the same maze.
 var _maze_cache := {}
 
 
@@ -67,9 +65,7 @@ func load(path: String) -> Dictionary:
 
 
 # === random maze ===
-# Builds a "perfect" maze (every tile reachable, exactly one route between any two tiles) with a
-# randomized depth-first search, then picks a random start tile and a goal far away from it.
-# Because there are no loops, the classic right-hand wall-following solution always works.
+# Builds a "perfect" maze (every tile reachable, exactly one route between any two tiles)
 # Optional settings in the level's "random_maze" object:
 #   "min_goal_distance": 0.0 - 1.0, how far the goal must be compared to the farthest tile
 #                        (default 0.75; higher = longer route)
@@ -140,6 +136,10 @@ func _generate_random_maze(source: Dictionary) -> Dictionary:
 			if not faces.is_empty():
 				walls["%d,%d" % [x, y]] = faces
 
+	var goal_objects := {}
+	if settings.get("goal_object") is Dictionary:
+		goal_objects["%d,%d" % [goal_cell.x, goal_cell.y]] = (settings["goal_object"] as Dictionary).duplicate()
+
 	var robots: Array = data.get("robots", [])
 	var robot: Dictionary = robots[0] if not robots.is_empty() and robots[0] is Dictionary else {"_orientation": 0, "objects": {}}
 	robot["x"] = start.x
@@ -152,12 +152,10 @@ func _generate_random_maze(source: Dictionary) -> Dictionary:
 	data["goal"] = {
 		"possible_final_positions": [[goal_cell.x, goal_cell.y]],
 		"position": {"x": goal_cell.x, "y": goal_cell.y, "image": "green_home_tile"},
-		"objects": {}
+		"objects": goal_objects
 	}
 	return data
 
-
-# same key no matter which of the two tiles you ask from
 func _maze_edge_key(a: Vector2i, b: Vector2i) -> String:
 	if a.x > b.x or (a.x == b.x and a.y > b.y):
 		var swap := a

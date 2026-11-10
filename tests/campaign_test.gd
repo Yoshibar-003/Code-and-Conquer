@@ -89,6 +89,7 @@ func _solve_labyrinth(world, player) -> void:
 			await player.move_forward(0.001)
 		else:
 			player.turn_left()
+	player.put_object()
 	check(world.is_at_goal(player.grid_x, player.grid_y), "Labyrinth must be solvable by wall following")
 
 func run_tests() -> void:
