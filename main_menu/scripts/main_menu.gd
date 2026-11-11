@@ -11,6 +11,10 @@
 extends Control
 
 const CUSTOM_LEVELS_DIR := "user://custom_levels/"
+const LevelValidator := preload("res://map/scripts/level_validator.gd")
+
+# simple popup used to tell the player why a level was rejected
+var error_dialog: AcceptDialog
 var campaign_menu: Window
 
 # we used get_node_or_null() directly here instead of going through get_tree().current_scene
@@ -54,6 +58,11 @@ func _ready() -> void:
 	level_popup.hide()
 	if options_popup != null:
 		options_popup.hide()
+
+	# error popup for invalid level files (built in code so the scene file stays untouched)
+	error_dialog = AcceptDialog.new()
+	error_dialog.title = "Invalid Level"
+	add_child(error_dialog)
 
 	# set up the file dialog for importing .json level files
 	level_file_dialog.hide()
@@ -181,6 +190,12 @@ func _on_level_editor_button_pressed() -> void:
 
 # this will copy the selected file into the custom levels folder and refreshes the dropdown
 func _on_level_file_selected(path: String) -> void:
+	# check the file BEFORE copying it in, so bad files never reach the levels folder
+	var check := LevelValidator.validate_file(path)
+	if not check.ok:
+		_show_level_error(path.get_file(), check.error)
+		return
+
 	var real_custom_dir := ProjectSettings.globalize_path(CUSTOM_LEVELS_DIR)
 	DirAccess.make_dir_recursive_absolute(real_custom_dir)
 
@@ -212,9 +227,26 @@ func _on_level_file_selected(path: String) -> void:
 	_update_play_button()
 
 
+# shows why a level was rejected; the player stays on the main menu
+func _show_level_error(file_name: String, message: String) -> void:
+	push_warning("Level rejected (%s): %s" % [file_name, message])
+	error_dialog.dialog_text = "Could not load \"%s\":\n\n%s" % [file_name, message]
+	error_dialog.popup_centered()
+
+
 # plays a little fade animation then loads the workstation scene
 func _on_play_button_pressed() -> void:
 	if SelectedLevel.path.is_empty():
+		return
+
+	# make sure the level is actually loadable before leaving the menu
+	var check := LevelValidator.validate_file(SelectedLevel.path)
+	if not check.ok:
+		_show_level_error(SelectedLevel.path.get_file(), check.error)
+		SelectedLevel.path = ""
+		if level_dropdown != null:
+			level_dropdown.select(0)
+		_update_play_button()
 		return
 
 	$StartSound.play()
