@@ -363,22 +363,27 @@ func _show_save_validation_dialog(issues: Dictionary, level_name: String, path: 
 func _write_level_file(level_name: String, path: String) -> void:
 	# Project levels stay in the repository while developing in Godot. Exported games
 	# cannot write to res://, so player-created levels use the writable user:// folder.
-	var folder_path := path
-	var full_folder_path := ProjectSettings.globalize_path(folder_path)
+	var save_path := path
+	if not save_path.to_lower().ends_with(".json"):
+		save_path += ".json"
 
-	DirAccess.make_dir_recursive_absolute(full_folder_path)
+	var parent_dir := save_path.get_base_dir()
+	DirAccess.make_dir_recursive_absolute(
+		ProjectSettings.globalize_path(parent_dir)
+	)
 
-	var file_name := _make_level_filename(level_name) + ".json"
-	var save_path := folder_path.path_join(file_name)
 	if FileAccess.file_exists(save_path):
 		var existing := FileAccess.open(save_path, FileAccess.READ)
 		var existing_json := JSON.new()
-		if existing == null or existing_json.parse(existing.get_as_text()) != OK or typeof(existing_json.data) != TYPE_DICTIONARY or str(existing_json.data.get("name", "")) != level_name:
+		if existing == null \
+		or existing_json.parse(existing.get_as_text()) != OK \
+		or typeof(existing_json.data) != TYPE_DICTIONARY \
+		or str(existing_json.data.get("name", "")) != level_name:
 			status_label.text = "Choose a different name; this filename is already used."
 			return
 
-	var temporary_path := folder_path.path_join(file_name + ".tmp")
-	var backup_path := folder_path.path_join(file_name + ".bak")
+	var temporary_path := save_path + ".tmp"
+	var backup_path := save_path + ".bak"
 	if FileAccess.file_exists(backup_path):
 		DirAccess.remove_absolute(backup_path)
 
