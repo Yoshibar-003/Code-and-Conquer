@@ -119,14 +119,13 @@
         9
       ]
     ],
-    "position": {
-      "image": "green_home_tile",
-      "x": 7,
-      "y": 9
-    },
-    "require_carry_object": "token"
+    "require_carry": {
+      "token": 1
+    }
   },
     "limits": {
-      "time_limit_seconds": 1800
+      "move_limit": 0,
+      "cmd_limit": 0,
+      "time_limit_seconds": 120
     }
 }

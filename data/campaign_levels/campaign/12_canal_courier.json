@@ -40,11 +40,7 @@
     "8,6": {"token": 4}
   },
   "goal": {
-    "position": {
-      "x": 8,
-      "y": 2,
-      "image": "green_home_tile"
-    },
+    "possible_final_positions": [[8, 2]],
     "objects": {
       "8,2": {
         "token": 6
@@ -79,6 +75,8 @@
     ]
   },
     "limits": {
-      "time_limit_seconds": 1800
+      "move_limit": 0,
+      "cmd_limit": 0,
+      "time_limit_seconds": 150
     }
 }

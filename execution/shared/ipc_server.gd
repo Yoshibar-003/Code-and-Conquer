@@ -37,34 +37,53 @@ func wait_for_connection(tree: SceneTree) -> bool:
 
 # Read one newline-terminated message from the subprocess.
 # Returns "[CANCELLED]" or "[DISCONNECT]" on stop/crash.
+
+
 func read_line(tree: SceneTree) -> String:
 	while not _cancelled:
 		if _peer == null:
 			return "[DISCONNECT]"
+
 		_peer.poll()
 		var status := _peer.get_status()
-		if status == StreamPeerTCP.STATUS_ERROR or status == StreamPeerTCP.STATUS_NONE:
-			return "[DISCONNECT]"
-		var available := _peer.get_available_bytes()
 
-		if available > 0:
-			_buf += _peer.get_utf8_string(available)
+		# Only read from an active TCP connection.
+		if status == StreamPeerTCP.STATUS_CONNECTED:
+			var available := _peer.get_available_bytes()
 
-			if _buf.length() > MAX_MESSAGE_CHARS:
+			if available > 0:
+				_buf += _peer.get_utf8_string(available)
+
+		# Process complete buffered messages first.
+		var idx := _buf.find("\n")
+
+		if idx != -1:
+			if idx > MAX_MESSAGE_CHARS:
 				return "[PROTOCOL_ERROR]"
 
-		var idx := _buf.find("\n")
-		if idx != -1:
 			var line := _buf.substr(0, idx).strip_edges()
 			_buf = _buf.substr(idx + 1)
+
 			if not _authenticated:
 				if line == "[AUTH] " + _expected_token:
 					_authenticated = true
 					continue
+
 				return "[AUTH_FAILED]"
+
 			return line
+
+		# Prevent unlimited buffer growth.
+		if _buf.length() > MAX_MESSAGE_CHARS:
+			return "[PROTOCOL_ERROR]"
+
+		# Handle disconnected or failed connections.
+		if status == StreamPeerTCP.STATUS_ERROR \
+		or status == StreamPeerTCP.STATUS_NONE:
+			return "[DISCONNECT]"
+
 		await tree.process_frame
-		
+
 	return "[CANCELLED]"
 
 func send(text: String) -> void:
