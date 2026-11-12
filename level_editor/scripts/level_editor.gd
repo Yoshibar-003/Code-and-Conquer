@@ -317,9 +317,6 @@ func _save_level_to_path(path: String, dialog: FileDialog) -> void:
 		document.data["limits"] = limits_data
 	elif document.data.has("limits"):
 		document.data.erase("limits")
-	# Keep a recoverable copy until the completed temporary file replaces it
-	var temporary_path := path + ".tmp"
-	var backup_path := path + ".bak"
 
 	var issues := document.validate_level()
 	if not issues["errors"].is_empty() or not issues["warnings"].is_empty():
