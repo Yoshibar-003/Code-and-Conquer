@@ -323,13 +323,13 @@ func _save_level_to_path(path: String, dialog: FileDialog) -> void:
 
 	var issues := document.validate_level()
 	if not issues["errors"].is_empty() or not issues["warnings"].is_empty():
-		_show_save_validation_dialog(issues, level_name)
+		_show_save_validation_dialog(issues, level_name, path)
 		return
 
-	_write_level_file(level_name)
+	_write_level_file(level_name, path)
 
 
-func _show_save_validation_dialog(issues: Dictionary, level_name: String) -> void:
+func _show_save_validation_dialog(issues: Dictionary, level_name: String, path: String) -> void:
 	var lines := PackedStringArray()
 	var errors: PackedStringArray = issues["errors"]
 	var warnings: PackedStringArray = issues["warnings"]
@@ -350,7 +350,7 @@ func _show_save_validation_dialog(issues: Dictionary, level_name: String) -> voi
 	dialog.cancel_button_text = "Keep Editing"
 	dialog.confirmed.connect(func() -> void:
 		dialog.queue_free()
-		_write_level_file(level_name)
+		_write_level_file(level_name, path)
 	)
 	var cancel := func() -> void:
 		dialog.queue_free()
@@ -360,10 +360,10 @@ func _show_save_validation_dialog(issues: Dictionary, level_name: String) -> voi
 	dialog.popup_centered()
 
 
-func _write_level_file(level_name: String) -> void:
+func _write_level_file(level_name: String, path: String) -> void:
 	# Project levels stay in the repository while developing in Godot. Exported games
 	# cannot write to res://, so player-created levels use the writable user:// folder.
-	var folder_path := PROJECT_CUSTOM_LEVELS_DIR if OS.has_feature("editor") else PLAYER_CUSTOM_LEVELS_DIR
+	var folder_path := path
 	var full_folder_path := ProjectSettings.globalize_path(folder_path)
 
 	DirAccess.make_dir_recursive_absolute(full_folder_path)
