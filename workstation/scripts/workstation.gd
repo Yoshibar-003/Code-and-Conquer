@@ -376,7 +376,7 @@ func _setup_campaign_ui() -> void:
 	campaign_hint_button = Button.new()
 	campaign_hint_button.text = "Show Hint"
 	campaign_hint_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	campaign_hint_button.visible = bool(_saved_setting("learning", "beginner_hints", true))
+	campaign_hint_button.visible = bool(_saved_setting("learning", "hints", true))
 	campaign_hint_button.pressed.connect(func():
 		campaign_hint.visible = not campaign_hint.visible
 		campaign_hint_button.text = "Hide Hint" if campaign_hint.visible else "Show Hint")
@@ -414,7 +414,7 @@ func _apply_saved_preferences() -> void:
 		editor.add_theme_color_override("background_color", Color("#f2f4f8"))
 		editor.add_theme_color_override("font_color", Color("#1b2430"))
 
-	var hints_enabled := bool(_saved_setting("learning", "beginner_hints", true))
+	var hints_enabled := bool(_saved_setting("learning", "hints", true))
 	if campaign_hint_button != null:
 		campaign_hint_button.visible = hints_enabled
 
@@ -440,7 +440,7 @@ func _refresh_campaign_instructions() -> void:
 		campaign_hint_button.hide()
 		campaign_hint.text = ""
 		return
-	campaign_hint_button.visible = bool(_saved_setting("learning", "beginner_hints", true))
+	campaign_hint_button.visible = bool(_saved_setting("learning", "hints", true))
 	var description := PackedStringArray(current_level_definition.get("description", []))
 	campaign_instructions.text = "Level %d / %d - %s\n%s" % [index + 1, Campaign.LEVELS.size(), Campaign.LEVELS[index].title, " ".join(description)]
 	campaign_hint.text = current_level_definition.get("hint", "")

@@ -28,7 +28,7 @@ const CHOICE_UNSELECTED_COLOR := Color(0.6, 0.65, 0.75)
 @onready var sfx_slider: HSlider = $Panel/ScrollContainer/VBoxContainer/SfxSlider
 @onready var grid_coordinates_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/GridCoordinatesCheck
 @onready var command_trail_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/CommandTrailCheck
-@onready var beginner_hints_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/BeginnerHintsCheck
+@onready var hints_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/HintsCheck
 @onready var default_language_option: OptionButton = $Panel/ScrollContainer/VBoxContainer/DefaultLanguageOption
 @onready var reset_button: Button = $Panel/ScrollContainer/VBoxContainer/ResetButton
 @onready var back_button: Button = $Panel/ScrollContainer/VBoxContainer/BackButton
@@ -50,7 +50,7 @@ func _ready() -> void:
 		sfx_slider.value_changed.connect(_on_preference_changed)
 	if not default_language_option.item_selected.is_connected(_on_option_selected):
 		default_language_option.item_selected.connect(_on_option_selected)
-	for check in [grid_coordinates_check, command_trail_check, beginner_hints_check]:
+	for check in [grid_coordinates_check, command_trail_check, hints_check]:
 		if not check.toggled.is_connected(_on_toggle_changed):
 			check.toggled.connect(_on_toggle_changed)
 	if not reset_button.pressed.is_connected(_on_reset_button_pressed):
@@ -198,7 +198,7 @@ func _load_settings() -> void:
 		_choice_index["animation_speed"] = clampi(int(config.get_value("gameplay", "animation_speed", 0)), 0, 1)
 		grid_coordinates_check.button_pressed = bool(config.get_value("learning", "show_grid_coordinates", false))
 		command_trail_check.button_pressed = bool(config.get_value("learning", "show_command_trail", true))
-		beginner_hints_check.button_pressed = bool(config.get_value("learning", "beginner_hints", true))
+		hints_check.button_pressed = bool(config.get_value("learning", "hints", true))
 		_choice_index["default_language"] = clampi(int(config.get_value("editor", "default_language", 0)), 0, 1)
 	else:
 		volume_slider.value = 1.0
@@ -208,7 +208,7 @@ func _load_settings() -> void:
 			_choice_index[key] = DEFAULT_CHOICE_INDEX[key]
 		grid_coordinates_check.button_pressed = false
 		command_trail_check.button_pressed = true
-		beginner_hints_check.button_pressed = true
+		hints_check.button_pressed = true
 
 	_refresh_choice_visuals()
 	_apply_settings()
@@ -246,7 +246,7 @@ func _save_settings() -> void:
 	config.set_value("gameplay", "animation_speed", _choice_index["animation_speed"])
 	config.set_value("learning", "show_grid_coordinates", grid_coordinates_check.button_pressed)
 	config.set_value("learning", "show_command_trail", command_trail_check.button_pressed)
-	config.set_value("learning", "beginner_hints", beginner_hints_check.button_pressed)
+	config.set_value("learning", "hints", hints_check.button_pressed)
 	config.set_value("editor", "default_language", _choice_index["default_language"])
 	var save_result := config.save(SETTINGS_PATH)
 	if save_result != OK:
@@ -291,7 +291,7 @@ func _on_reset_button_pressed() -> void:
 	_request_window_mode(SettingsManagerScript.WINDOW_MODE_WINDOWED)
 	grid_coordinates_check.button_pressed = false
 	command_trail_check.button_pressed = true
-	beginner_hints_check.button_pressed = true
+	hints_check.button_pressed = true
 	_refresh_choice_visuals()
 	_apply_settings()
 	_save_settings()

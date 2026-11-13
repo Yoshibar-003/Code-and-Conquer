@@ -404,9 +404,9 @@ text = "SHOW GRID COORDINATES"
 layout_mode = 2
 text = "SHOW COMMAND TRAIL"
 
-[node name="BeginnerHintsCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1647404327]
+[node name="HintsCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1647404327]
 layout_mode = 2
-text = "ENABLE BEGINNER HINTS"
+text = "ENABLE HINTS"
 
 [node name="DefaultLanguageLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=381919909]
 layout_mode = 2
