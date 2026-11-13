@@ -360,36 +360,41 @@ theme_override_colors/font_color = Color(0.55, 0.85, 1, 1)
 theme_override_font_sizes/font_size = 20
 text = "WINDOW MODE"
 
-[node name="WindowModeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1632772637]
+[node name="WindowModeRow" type="HBoxContainer" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1632772637]
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="UiScaleLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=572437409]
 layout_mode = 2
 text = "UI SCALE"
 
-[node name="UiScaleOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=682985160]
+[node name="UiScaleRow" type="HBoxContainer" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=682985160]
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="CodeFontSizeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=982564652]
 layout_mode = 2
 text = "CODE FONT SIZE"
 
-[node name="CodeFontSizeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=2020539863]
+[node name="CodeFontSizeRow" type="HBoxContainer" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=2020539863]
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="EditorThemeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=27073366]
 layout_mode = 2
 text = "EDITOR THEME"
 
-[node name="EditorThemeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1500975835]
+[node name="EditorThemeRow" type="HBoxContainer" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1500975835]
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="AnimationSpeedLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=206908430]
 layout_mode = 2
 text = "ANIMATION SPEED"
 
-[node name="AnimationSpeedOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=234268900]
+[node name="AnimationSpeedRow" type="HBoxContainer" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=234268900]
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="GridCoordinatesCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1859547772]
 layout_mode = 2
