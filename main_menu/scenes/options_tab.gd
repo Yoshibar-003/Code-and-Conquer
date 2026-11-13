@@ -227,7 +227,13 @@ func _apply_settings() -> void:
 
 
 func _save_settings() -> void:
+	# Merge onto the existing file so keys this panel doesn't own survive.
+	# On unreadable/corrupt config, fall back to a fresh file; every known
+	# key is written below anyway, so this repairs rather than truncates.
 	var config := ConfigFile.new()
+	var load_result := config.load(SETTINGS_PATH)
+	if load_result != OK and load_result != ERR_FILE_NOT_FOUND:
+		config = ConfigFile.new()
 	config.set_value("audio", "master_volume", volume_slider.value)
 	config.set_value("audio", "music_volume", music_slider.value)
 	config.set_value("audio", "sfx_volume", sfx_slider.value)
@@ -242,7 +248,9 @@ func _save_settings() -> void:
 	config.set_value("learning", "show_command_trail", command_trail_check.button_pressed)
 	config.set_value("learning", "beginner_hints", beginner_hints_check.button_pressed)
 	config.set_value("editor", "default_language", _choice_index["default_language"])
-	config.save(SETTINGS_PATH)
+	var save_result := config.save(SETTINGS_PATH)
+	if save_result != OK:
+		push_error("OptionsTab: could not write settings.cfg (%s)" % error_string(save_result))
 	var settings_manager := get_node_or_null("/root/SettingsManager")
 	if settings_manager != null:
 		settings_manager.reload_settings()
