@@ -140,7 +140,7 @@ func _update_play_button() -> void:
 	popup_play_button.disabled = not result.get("ok", false)
 
 func _on_button_start_pressed() -> void:
-	$TabMoveSound.play()
+	AudioManager.play_ui("menu_move")
 	campaign_menu.show_campaign()
 
 
@@ -158,7 +158,7 @@ func _open_custom_worlds() -> void:
 
 
 func _on_options_button_pressed() -> void:
-	$TabMoveSound.play()
+	AudioManager.play_ui("menu_move")
 
 	if options_popup != null:
 		options_popup.show()
@@ -170,20 +170,20 @@ func _on_quit_button_pressed() -> void:
 	if _quitting:
 		return
 	_quitting = true
-	$LoseSound.play()
+	AudioManager.play_ui("menu_lose")
 	await get_tree().create_timer(2.0).timeout
 	get_tree().quit()
 
 
 func _on_upload_level_button_pressed() -> void:
-	$TabMoveSound.play()
+	AudioManager.play_ui("menu_move")
 
 	if level_file_dialog != null:
 		level_file_dialog.popup_centered_ratio(0.75)
 
 
 func _on_level_editor_button_pressed() -> void:
-	$TabMoveSound.play()
+	AudioManager.play_ui("menu_move")
 	get_tree().change_scene_to_file("res://level_editor/scenes/level_editor.tscn")
 
 
@@ -233,7 +233,7 @@ func _on_play_button_pressed() -> void:
 		SelectedLevel.path = ""
 		_update_play_button()
 		return
-	$StartSound.play()
+	AudioManager.play_ui("menu_start")
 
 	if level_popup != null:
 		level_popup.hide()

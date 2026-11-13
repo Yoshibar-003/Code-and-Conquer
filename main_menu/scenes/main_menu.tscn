@@ -1,13 +1,10 @@
 [gd_scene format=3 uid="uid://bjd1nmwoya47g"]
 
 [ext_resource type="Texture2D" uid="uid://bydbiv2fb30ic" path="res://assets/images/BackgoundWithLogo.png" id="2_6hyfw"]
-[ext_resource type="AudioStream" uid="uid://76wvxkahxvx" path="res://assets/audio/start.mp3" id="2_suspn"]
 [ext_resource type="StyleBox" uid="uid://ca66rtxg32pd7" path="res://assets/themes/blue_button.tres" id="4_1iqtg"]
 [ext_resource type="Script" uid="uid://bacjqpx0lstd4" path="res://main_menu/scripts/level_loader.gd" id="5_1iqtg"]
-[ext_resource type="AudioStream" uid="uid://c54t0khjgkxeg" path="res://assets/audio/menumove.mp3" id="5_6hyfw"]
 [ext_resource type="StyleBox" uid="uid://m07piekpagsq" path="res://assets/themes/blue_buttonHover.tres" id="5_q11ey"]
 [ext_resource type="Script" uid="uid://8cgjt5y7ayld" path="res://main_menu/scenes/options_tab.gd" id="6_q11ey"]
-[ext_resource type="AudioStream" uid="uid://cosw7b2gsbra7" path="res://assets/audio/losesound.mp3" id="7_nu78t"]
 [ext_resource type="Script" uid="uid://ku1jvvw0a25w" path="res://main_menu/scripts/main_menu.gd" id="9_main"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_nu78t"]
@@ -299,7 +296,7 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_nu78t")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="MenuBG/OptionsTab/Panel" unique_id=1632772633]
+[node name="ScrollContainer" type="ScrollContainer" parent="MenuBG/OptionsTab/Panel" unique_id=1632772640]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -310,108 +307,114 @@ offset_right = -70.0
 offset_bottom = -35.0
 grow_horizontal = 2
 grow_vertical = 2
+horizontal_scroll_mode = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MenuBG/OptionsTab/Panel/ScrollContainer" unique_id=1632772633]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1632772634]
+[node name="Title" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1632772634]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.38, 0.82, 0.95, 1)
 theme_override_font_sizes/font_size = 30
 text = "OPTIONS"
 horizontal_alignment = 1
 
-[node name="VolumeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1632772635]
+[node name="VolumeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1632772635]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.85, 1, 1)
 theme_override_font_sizes/font_size = 20
 text = "MASTER VOLUME"
 
-[node name="VolumeSlider" type="HSlider" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1546095364]
+[node name="VolumeSlider" type="HSlider" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1546095364]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 max_value = 1.0
 step = 0.05
 value = 1.0
 
-[node name="MusicLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=980625715]
+[node name="MusicLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=980625715]
 layout_mode = 2
 text = "MUSIC VOLUME"
 
-[node name="MusicSlider" type="HSlider" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=678517061]
+[node name="MusicSlider" type="HSlider" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=678517061]
 layout_mode = 2
 max_value = 1.0
 step = 0.05
 value = 1.0
 
-[node name="SfxLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=507491144]
+[node name="SfxLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=507491144]
 layout_mode = 2
 text = "SOUND EFFECTS VOLUME"
 
-[node name="SfxSlider" type="HSlider" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=453734853]
+[node name="SfxSlider" type="HSlider" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=453734853]
 layout_mode = 2
 max_value = 1.0
 step = 0.05
 value = 1.0
 
-[node name="FullscreenCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1632772636]
-custom_minimum_size = Vector2(0, 50)
+[node name="WindowModeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1632772636]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.85, 1, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 20
-text = "FULLSCREEN"
+text = "WINDOW MODE"
 
-[node name="UiScaleLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=572437409]
+[node name="WindowModeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1632772637]
+layout_mode = 2
+
+[node name="UiScaleLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=572437409]
 layout_mode = 2
 text = "UI SCALE"
 
-[node name="UiScaleOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=682985160]
+[node name="UiScaleOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=682985160]
 layout_mode = 2
 
-[node name="CodeFontSizeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=982564652]
+[node name="CodeFontSizeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=982564652]
 layout_mode = 2
 text = "CODE FONT SIZE"
 
-[node name="CodeFontSizeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=2020539863]
+[node name="CodeFontSizeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=2020539863]
 layout_mode = 2
 
-[node name="EditorThemeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=27073366]
+[node name="EditorThemeLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=27073366]
 layout_mode = 2
 text = "EDITOR THEME"
 
-[node name="EditorThemeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1500975835]
+[node name="EditorThemeOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1500975835]
 layout_mode = 2
 
-[node name="AnimationSpeedLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=206908430]
+[node name="AnimationSpeedLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=206908430]
 layout_mode = 2
 text = "ANIMATION SPEED"
 
-[node name="AnimationSpeedOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=234268900]
+[node name="AnimationSpeedOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=234268900]
 layout_mode = 2
 
-[node name="GridCoordinatesCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1859547772]
+[node name="GridCoordinatesCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1859547772]
 layout_mode = 2
 text = "SHOW GRID COORDINATES"
 
-[node name="CommandTrailCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1850340837]
+[node name="CommandTrailCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1850340837]
 layout_mode = 2
 text = "SHOW COMMAND TRAIL"
 
-[node name="BeginnerHintsCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1647404327]
+[node name="BeginnerHintsCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1647404327]
 layout_mode = 2
 text = "ENABLE BEGINNER HINTS"
 
-[node name="DefaultLanguageLabel" type="Label" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=381919909]
+[node name="DefaultLanguageLabel" type="Label" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=381919909]
 layout_mode = 2
 text = "DEFAULT LANGUAGE"
 
-[node name="DefaultLanguageOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1959620853]
+[node name="DefaultLanguageOption" type="OptionButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1959620853]
 layout_mode = 2
 
-[node name="ResetButton" type="Button" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1093058412]
+[node name="ResetButton" type="Button" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1093058412]
 layout_mode = 2
 text = "RESET SETTINGS"
 
-[node name="BackButton" type="Button" parent="MenuBG/OptionsTab/Panel/VBoxContainer" unique_id=1432951235]
+[node name="BackButton" type="Button" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1432951235]
 custom_minimum_size = Vector2(0, 60)
 layout_mode = 2
 theme_type_variation = &"FlatButton"
@@ -422,15 +425,6 @@ theme_override_styles/normal = ExtResource("4_1iqtg")
 theme_override_styles/pressed = ExtResource("4_1iqtg")
 theme_override_styles/hover = ExtResource("5_q11ey")
 text = "BACK"
-
-[node name="StartSound" type="AudioStreamPlayer" parent="." unique_id=398680422]
-stream = ExtResource("2_suspn")
-
-[node name="TabMoveSound" type="AudioStreamPlayer" parent="." unique_id=142174545]
-stream = ExtResource("5_6hyfw")
-
-[node name="LoseSound" type="AudioStreamPlayer" parent="." unique_id=872956816]
-stream = ExtResource("7_nu78t")
 
 [node name="Mask" type="ColorRect" parent="." unique_id=1348239614]
 layout_mode = 1
