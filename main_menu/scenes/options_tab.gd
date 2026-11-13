@@ -1,7 +1,7 @@
 extends Control
 
-const SETTINGS_PATH := "user://settings.cfg"
 const SettingsManagerScript := preload("res://config/settings_manager.gd")
+const SETTINGS_PATH := SettingsManagerScript.SETTINGS_PATH
 
 # Choice rows: key -> [row node name, button labels]. The window_mode label order
 # must match SettingsManager's WINDOW_MODE_* constant values.
@@ -189,9 +189,9 @@ func _load_settings() -> void:
 		if settings_manager != null and settings_manager.has_method("get_window_mode"):
 			_choice_index["window_mode"] = settings_manager.get_window_mode()
 		else:
+			# Autoload missing (shouldn't happen): just clamp the raw value.
 			_choice_index["window_mode"] = clampi(int(config.get_value("display", "window_mode",
-				SettingsManagerScript.WINDOW_MODE_FULLSCREEN if bool(config.get_value("display", "fullscreen", false))
-				else SettingsManagerScript.WINDOW_MODE_WINDOWED)), SettingsManagerScript.WINDOW_MODE_WINDOWED, SettingsManagerScript.WINDOW_MODE_FULLSCREEN)
+				SettingsManagerScript.WINDOW_MODE_WINDOWED)), SettingsManagerScript.WINDOW_MODE_WINDOWED, SettingsManagerScript.WINDOW_MODE_FULLSCREEN)
 		_choice_index["ui_scale"] = clampi(int(config.get_value("display", "ui_scale", 1)), 0, 2)
 		_choice_index["code_font_size"] = clampi(int(config.get_value("editor", "font_size", 1)), 0, 2)
 		_choice_index["editor_theme"] = clampi(int(config.get_value("editor", "theme", 0)), 0, 1)
