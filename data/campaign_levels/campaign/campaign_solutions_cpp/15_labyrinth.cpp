@@ -7,9 +7,13 @@ void turn_right() {
 }
 
 int main() {
-    // Solve any maze: keep going until you reach the goal.
-    while (!at_goal()) {
-        // Add your maze-solving logic here.
+    // Solve any maze: find the token and deliver it to the goal.
+    bool carrying = false;
+    while (!(carrying && at_goal())) {
+        if (!carrying && object_here()) {
+            pick_object();
+            carrying = true;
+        }
         if (right_is_clear()) {
             turn_right();
             move();
@@ -19,5 +23,6 @@ int main() {
             turn_left();
         }
     }
+    put_object();
     return 0;
 }

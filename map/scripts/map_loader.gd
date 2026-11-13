@@ -131,6 +131,13 @@ func _generate_random_maze(source: Dictionary) -> Dictionary:
 			goal_choices.append(cell)
 	var goal_cell: Vector2i = goal_choices[rng.randi_range(0, goal_choices.size() - 1)]
 
+	var token_count := maxi(0, int(settings.get("token", 0)))
+	var token_choices: Array[Vector2i] = []
+	for cell in distance:
+		if cell != start and cell != goal_cell:
+			token_choices.append(cell)
+	var token_cell: Vector2i = token_choices[rng.randi_range(0, token_choices.size() - 1)] if token_count > 0 and not token_choices.is_empty() else Vector2i.ZERO
+
 	# every closed edge between neighbouring tiles becomes a wall (east / north faces only)
 	var walls := {}
 	for x in range(1, cols + 1):
@@ -157,6 +164,10 @@ func _generate_random_maze(source: Dictionary) -> Dictionary:
 		"position": {"x": goal_cell.x, "y": goal_cell.y, "image": "green_home_tile"},
 		"objects": {}
 	}
+	data["objects"] = {}
+	if token_cell != Vector2i.ZERO:
+		data["objects"] = {"%d,%d" % [token_cell.x, token_cell.y]: {"token": token_count}}
+		data["goal"]["objects"] = {"%d,%d" % [goal_cell.x, goal_cell.y]: {"token": token_count}}
 	return data
 
 

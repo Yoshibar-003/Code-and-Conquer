@@ -78,8 +78,13 @@ func _right_of(facing: String) -> String:
 # 15_labyrinth.cpp reference solution).
 func _solve_labyrinth(world, player) -> void:
 	var iterations := 0
-	while not world.is_at_goal(player.grid_x, player.grid_y) and iterations < 2000:
+	var needs_token: bool = world.level_data.has("objects") and not world.level_data["objects"].is_empty()
+	var carrying := not needs_token
+	while not (carrying and world.is_at_goal(player.grid_x, player.grid_y)) and iterations < 2000:
 		iterations += 1
+		if not carrying and world.tile_has_any_object(player.grid_x, player.grid_y):
+			player.pick_object()
+			carrying = true
 		if not world.is_move_blocked(player.grid_x, player.grid_y, _right_of(player.facing)):
 			player.turn_left()
 			player.turn_left()
@@ -90,6 +95,9 @@ func _solve_labyrinth(world, player) -> void:
 		else:
 			player.turn_left()
 	check(world.is_at_goal(player.grid_x, player.grid_y), "Labyrinth must be solvable by wall following")
+	if needs_token:
+		player.put_object()
+		check(world.are_goal_objects_satisfied(), "Labyrinth token must be delivered to the goal")
 
 func run_tests() -> void:
 	check(Campaign.LEVELS.size() == 15, "Campaign must have fifteen levels")
