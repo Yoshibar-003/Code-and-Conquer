@@ -65,7 +65,10 @@ func _ready() -> void:
 # without this, the sync below would revert the selection mid-transition.
 var _pending_window_mode := -1
 var _pending_window_mode_since := 0.0
-const PENDING_WINDOW_MODE_TIMEOUT := 0.5
+# Generous on purpose: window-mode transitions normally finish in a few
+# frames, but a slow OS transition must not be mistaken for an ignored
+# request — the sync below would persist the intermediate mode otherwise.
+const PENDING_WINDOW_MODE_TIMEOUT := 2.0
 
 
 # Keeps the WINDOW MODE row in sync with the actual window state while the
