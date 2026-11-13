@@ -145,6 +145,7 @@ func _on_button_start_pressed() -> void:
 
 
 func _open_custom_worlds() -> void:
+	AudioManager.play_ui("menu_move")
 
 	# refreshes the dropdown in case new levels were added since the menu loaded the first time
 	# refreshes the campaign levels before showing popup
