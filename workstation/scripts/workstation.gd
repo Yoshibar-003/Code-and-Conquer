@@ -340,6 +340,30 @@ func _compile_cpp_in_background(source: String, build_dir: String) -> Dictionary
 		}
 	return background_compiler.compile_program()
 
+
+func _prune_stale_cpp_build_dirs(root: String, keep_hash: String) -> void:
+	var dir := DirAccess.open(root)
+	if dir == null:
+		return
+	var cutoff := Time.get_unix_time_from_system() - 7 * 24 * 60 * 60
+	for child in dir.get_directories():
+		if child == keep_hash:
+			continue
+		var child_path := root.path_join(child)
+		var modified: int = dir.get_modified_time(child_path)
+		if modified > 0 and modified < cutoff:
+			_remove_dir_recursive(child_path)
+
+
+func _remove_dir_recursive(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	for file_name in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(file_name))
+	for dir_name in DirAccess.get_directories_at(path):
+		_remove_dir_recursive(path.path_join(dir_name))
+	DirAccess.remove_absolute(path)
+
 func _finish_cpp_check(source: String, line_offset: int) -> void:
 	while _compile_thread.is_alive():
 		await get_tree().process_frame
@@ -2338,7 +2362,10 @@ func _on_check_button_pressed() -> void:
 		return
 
 	var generated: Dictionary = generator.generate(source)
-	var check_build_dir := ProjectSettings.globalize_path("user://checked_build")
+	# Key the build dir by source content so concurrent instances can't share artifacts.
+	var check_build_root := ProjectSettings.globalize_path("user://checked_build")
+	var check_build_dir := check_build_root.path_join(str(generated.generated_source).sha256_text())
+	_prune_stale_cpp_build_dirs(check_build_root, check_build_dir.get_file())
 
 	check_button.disabled = true
 	run_button.disabled = true
