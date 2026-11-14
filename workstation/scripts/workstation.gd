@@ -331,7 +331,13 @@ func _setup_level_windows() -> void:
 
 func _compile_cpp_in_background(source: String, build_dir: String) -> Dictionary:
 	var background_compiler = preload(Paths.CPP_DRIVER).new()
-	background_compiler.prepare_build_files(source, build_dir)
+	if not background_compiler.prepare_build_files(source, build_dir):
+		return {
+			"ok": false,
+			"output": background_compiler.get_prepare_error(),
+			"reason": background_compiler.get_prepare_reason(),
+			"exe_path": ""
+		}
 	return background_compiler.compile_program()
 
 func _finish_cpp_check(source: String, line_offset: int) -> void:
@@ -346,8 +352,20 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 	language_selector.disabled = false
 
 	if not build.ok:
-		log_error(compiler.remap_diagnostics(build.output, line_offset))
-		_set_status("Compile failed", "error")
+		var raw_output := str(build.get("output", ""))
+		match str(build.get("reason", "")):
+			"no_compiler":
+				log_error("A C++ compiler was not found. Please install a C++ compiler first, then restart the game.")
+				_set_status("C++ Compiler unavailable", "error")
+			"unsupported_platform":
+				log_error(raw_output)
+				_set_status("C++ not supported on this platform", "error")
+			"prepare_error", "internal_error":
+				log_error(raw_output)
+				_set_status("Build setup failed", "error")
+			_:
+				log_error(compiler.remap_diagnostics(raw_output, line_offset))
+				_set_status("Compile failed", "error")
 		return
 
 	checked_code = source
@@ -356,7 +374,7 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 	checked_cpp_line_offset = line_offset
 	run_button.disabled = false
 	_set_status("C++ compiled successfully — ready to run.", "")
-	log_line("C++ compilation passed.")
+	log_line("C++ code unchanged — previous build reused." if build.get("cached", false) else "C++ compilation passed.")
 
 func _setup_campaign_ui() -> void:
 	campaign_panel = VBoxContainer.new()
@@ -1402,11 +1420,17 @@ func _run_pipeline() -> void:
 			return
 
 
-	if current_language == Language.CPP and not compiler.is_available():
-		log_error("A C++ compiler was not found. Please install a C++ compiler first, then restart the game.")
-		_set_status("C++ Compiler unavailable", "error")
-		_re_enable_buttons()
-		return
+	if current_language == Language.CPP:
+		if not compiler.is_platform_supported():
+			log_error("C++ execution is not supported on this OS or architecture.")
+			_set_status("C++ not supported on this platform", "error")
+			_re_enable_buttons()
+			return
+		if not compiler.detect_compiler():
+			log_error("A C++ compiler was not found. Please install a C++ compiler first, then restart the game.")
+			_set_status("C++ Compiler unavailable", "error")
+			_re_enable_buttons()
+			return
 
 	if current_language == Language.PYTHON and not py_pipeline.is_available():
 		log_error("The bundled Python runtime is unavailable for this platform.")
@@ -2304,13 +2328,13 @@ func _on_check_button_pressed() -> void:
 		_set_status("Check failed", "error")
 		return
 
-	# C++: then compile only after validation passes.
-	if not compiler.is_available():
-		log_error("A C++ compiler was not found.")
-		_set_status("C++ compiler unavailable", "error")
+	# Probe the compiler on the main thread so the background compile only reads the cached result.
+	if _compile_thread != null:
 		return
 
-	if _compile_thread != null:
+	if compiler.is_platform_supported() and not compiler.detect_compiler():
+		log_error("A C++ compiler was not found. Please install a C++ compiler first, then restart the game.")
+		_set_status("C++ Compiler unavailable", "error")
 		return
 
 	var generated: Dictionary = generator.generate(source)

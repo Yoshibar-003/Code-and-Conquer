@@ -7,7 +7,10 @@ var _commands = preload(Paths.ROBOT_COMMANDS).new()
 var _runtime_assets = preload(Paths.RUNTIME_ASSETS).new()
 var _active_build_dir: String = ""
 var _prepare_error: String = ""
-var _compiler: String = ""
+var _prepare_reason: String = ""
+static var _compiler: String = ""
+static var _compiler_probed := false
+static var _compiler_version_output: Array = []
 
 
 func _get_exe_path() -> String:
@@ -17,10 +20,12 @@ func _get_exe_path() -> String:
 
 func prepare_build_files(source: String, sandbox_path: String = "", ipc_endpoint: String = "") -> bool:
 	_prepare_error = ""
+	_prepare_reason = ""
 	_active_build_dir = ""
 	var tag := _runtime_assets.platform_tag()
 	if tag.is_empty():
 		_prepare_error = "C++ execution is not supported on this OS or architecture."
+		_prepare_reason = "unsupported_platform"
 		return false
 
 	var runtime_source := ""
@@ -31,19 +36,43 @@ func prepare_build_files(source: String, sandbox_path: String = "", ipc_endpoint
 			runtime_source = _commands.get_cpp_unix_source()
 		_:
 			_prepare_error = "C++ execution is not supported on this OS."
+			_prepare_reason = "unsupported_platform"
 			return false
 
 	var build_dir := sandbox_path if not sandbox_path.is_empty() else ProjectSettings.globalize_path(BUILD_DIR)
 	_active_build_dir = build_dir
 	DirAccess.make_dir_recursive_absolute(build_dir)
-	_write_file(build_dir.path_join("student_code.cpp"), source)
-	_write_file(build_dir.path_join("robot.hpp"), _commands.get_cpp_header())
-	_write_file(build_dir.path_join("robot_runtime.cpp"), runtime_source)
+	var files := {
+		"student_code.cpp": source,
+		"robot.hpp": _commands.get_cpp_header(),
+		"robot_runtime.cpp": runtime_source,
+	}
+	for name in files:
+		if not _write_file(build_dir.path_join(name), files[name]):
+			_prepare_error = "Failed to write C++ build files."
+			_prepare_reason = "prepare_error"
+			return false
 	return true
 
 
+func get_prepare_error() -> String:
+	return _prepare_error
+
+
+func get_prepare_reason() -> String:
+	return _prepare_reason
+
+
+func is_platform_supported() -> bool:
+	return not _runtime_assets.platform_tag().is_empty()
+
+
+func detect_compiler() -> bool:
+	return _find_compiler() != ""
+
+
 func is_available() -> bool:
-	return not _runtime_assets.platform_tag().is_empty() and _find_compiler() != ""
+	return is_platform_supported() and detect_compiler()
 
 
 func compile_program() -> Dictionary:
@@ -52,12 +81,14 @@ func compile_program() -> Dictionary:
 		return {
 			"ok": false,
 			"output": _prepare_error,
+			"reason": _prepare_reason if not _prepare_reason.is_empty() else "prepare_error",
 			"exe_path": ""
 		}
 	if _active_build_dir.is_empty():
 		return {
 			"ok": false,
 			"output": "No build directory was prepared.",
+			"reason": "internal_error",
 			"exe_path": ""
 		}
 
@@ -66,6 +97,7 @@ func compile_program() -> Dictionary:
 		return {
 			"ok": false,
 			"output": "A C++ compiler was not found.",
+			"reason": "no_compiler",
 			"exe_path": ""
 		}
 
@@ -73,20 +105,66 @@ func compile_program() -> Dictionary:
 	var robot_cpp := _active_build_dir.path_join("robot_runtime.cpp")
 	var exe := _get_exe_path()
 
-	if FileAccess.file_exists(exe):
-		DirAccess.remove_absolute(exe)
-
 	var args := ["-std=c++17", "-Wall", "-Wextra"]
 	if OS.get_name() == "Windows":
 		args.append("-static")
-	args.append_array([student_cpp, robot_cpp, "-o", exe])
+	var runtime_key := (compiler + str(_compiler_version_output) + str(args) + FileAccess.get_file_as_string(robot_cpp)
+		+ FileAccess.get_file_as_string(_active_build_dir.path_join("robot.hpp"))).sha256_text()
+	var build_key := (runtime_key + FileAccess.get_file_as_string(student_cpp)).sha256_text()
+	var cache_path := _active_build_dir.path_join("compile_cache.cfg")
+	var cache := ConfigFile.new()
+	cache.load(cache_path)
+	var exe_hash := FileAccess.get_sha256(exe)
+	if cache.get_value("build", "key", "") == build_key and exe_hash != "" \
+			and cache.get_value("build", "exe_hash", "") == exe_hash:
+		return {"ok": true, "output": "", "exe_path": exe, "cached": true}
+
+	# Student edits reuse the compiled robot runtime.
+	var runtime_object := _active_build_dir.path_join("robot_runtime.o")
+	var runtime_reused := false
+	if cache.get_value("runtime", "key", "") == runtime_key and FileAccess.file_exists(runtime_object):
+		runtime_reused = cache.get_value("runtime", "object_hash", "") == FileAccess.get_sha256(runtime_object)
+	if not runtime_reused:
+		var runtime_args := args.duplicate()
+		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_object])
+		if OS.execute(compiler, runtime_args, output, true) != 0:
+			return {"ok": false, "output": "\n".join(output), "reason": "compile_error", "exe_path": ""}
+		var runtime_object_hash := FileAccess.get_sha256(runtime_object)
+		if runtime_object_hash.is_empty():
+			return {
+				"ok": false,
+				"output": "Compiled robot runtime could not be hashed.",
+				"reason": "internal_error",
+				"exe_path": ""
+			}
+		cache.set_value("runtime", "key", runtime_key)
+		cache.set_value("runtime", "object_hash", runtime_object_hash)
+		cache.save(cache_path)
+
+	# Failed builds must not reuse an older successful executable.
+	if cache.has_section("build"):
+		cache.erase_section("build")
+	cache.save(cache_path)
+	if FileAccess.file_exists(exe):
+		DirAccess.remove_absolute(exe)
+	args.append_array([student_cpp, runtime_object, "-o", exe])
 	if OS.get_name() == "Windows":
 		args.append("-lws2_32")
 
+	# Discard runtime compile output so its warnings aren't misattributed to student code.
+	output.clear()
+
 	var exit_code := OS.execute(compiler, args, output, true)
+	var diagnostics := "\n".join(output)
+	if exit_code == 0:
+		cache.set_value("build", "key", build_key)
+		cache.set_value("build", "exe_hash", FileAccess.get_sha256(exe))
+	cache.save(cache_path)
 	return {
 		"ok": exit_code == 0,
-		"output": "" if output.is_empty() else str(output[0]),
+		"output": diagnostics,
+		"reason": "" if exit_code == 0 else "compile_error",
+		"cached": false,
 		"exe_path": exe if exit_code == 0 else ""
 	}
 
@@ -135,17 +213,26 @@ func remap_diagnostics(raw_text: String, line_offset: int) -> String:
 func _find_compiler() -> String:
 	if not _compiler.is_empty():
 		return _compiler
+	if _compiler_probed:
+		return ""
+	_compiler_probed = true
 	for candidate in ["g++", "clang++", "c++"]:
 		var output: Array = []
 		if OS.execute(candidate, ["--version"], output, true) == 0:
+			_compiler_version_output = output
 			_compiler = candidate
 			return _compiler
 	return ""
 
 
-func _write_file(path: String, text: String) -> void:
+func _write_file(path: String, text: String) -> bool:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		push_error("Failed to open file for writing: " + path)
-		return
-	f.store_string(text)
+		return false
+	if not f.store_string(text):
+		f.close()
+		push_error("Failed to write file: " + path)
+		return false
+	f.close()
+	return true
