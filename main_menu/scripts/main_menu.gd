@@ -130,6 +130,10 @@ func _update_play_button() -> void:
 	if popup_play_button == null:
 		return
 
+	if _input_locked:
+		popup_play_button.disabled = true
+		return
+
 	if SelectedLevel.path.is_empty():
 		popup_play_button.disabled = true
 		return
@@ -165,11 +169,41 @@ func _on_options_button_pressed() -> void:
 
 
 var _quitting := false
+var _input_locked := false
+
+# greys out every button and closes any open popup so nothing can be clicked
+# while the quit delay or the level-load fade is running
+func _lock_menu_input() -> void:
+	if _input_locked:
+		return
+	_input_locked = true
+
+	var container := get_node_or_null("MenuBG/ButtonsContainer")
+	if container != null:
+		for child in container.get_children():
+			if child is BaseButton:
+				child.disabled = true
+
+	if popup_play_button != null:
+		popup_play_button.disabled = true
+	if level_dropdown != null:
+		level_dropdown.disabled = true
+
+	if level_popup != null:
+		level_popup.hide()
+	if options_popup != null:
+		options_popup.hide()
+	if level_file_dialog != null:
+		level_file_dialog.hide()
+	if campaign_menu != null:
+		campaign_menu.hide()
+
 func _on_quit_button_pressed() -> void:
 	# prevents the quit sequence from running 2 times if the button gets clicked again during the delay
 	if _quitting:
 		return
 	_quitting = true
+	_lock_menu_input()
 	$LoseSound.play()
 	await get_tree().create_timer(2.0).timeout
 	get_tree().quit()
@@ -222,7 +256,7 @@ func _on_level_file_selected(path: String) -> void:
 
 # plays a little fade animation then loads the workstation scene
 func _on_play_button_pressed() -> void:
-	if SelectedLevel.path.is_empty():
+	if _input_locked or SelectedLevel.path.is_empty():
 		return
 
 	var validator = load(Paths.MAP_LOADER).new()
@@ -233,6 +267,7 @@ func _on_play_button_pressed() -> void:
 		SelectedLevel.path = ""
 		_update_play_button()
 		return
+	_lock_menu_input()
 	$StartSound.play()
 
 	if level_popup != null:
