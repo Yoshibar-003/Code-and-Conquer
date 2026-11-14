@@ -28,7 +28,7 @@ var active_tool := Tool.ROBOT
 var suppress_tool_application := false
 
 var document: LevelDocument
-var show_coordinates := false
+var show_coordinates := true
 var object_type := "token"
 var object_count := 1
 var zoom_level := 1.0
@@ -53,6 +53,7 @@ const OBJECT_ICONS := {
 	"star": STAR_ICON,
 	"token": TOKEN_ICON
 }
+const COORDINATES_FONT := preload("res://assets/fonts/ttf/FiraCode-Medium.ttf")
 
 
 func _draw_icon(texture: Texture2D, center: Vector2, icon_size := 32.0) -> void:
@@ -61,12 +62,6 @@ func _draw_icon(texture: Texture2D, center: Vector2, icon_size := 32.0) -> void:
 		Vector2.ONE * icon_size
 	)
 	draw_texture_rect(texture, rect, false)
-
-
-func _ready() -> void:
-	var config := ConfigFile.new()
-	if config.load("user://settings.cfg") == OK:
-		show_coordinates = bool(config.get_value("learning", "show_grid_coordinates", false))
 
 
 func set_document(value: LevelDocument) -> void:
@@ -103,8 +98,6 @@ func _draw() -> void:
 				draw_rect(rect, Color("0b1020"))
 				draw_texture_rect(VOID_ICON, rect.grow(-8.0), false)
 			draw_rect(rect, Color("#668099"), false, 1.0)
-			if show_coordinates:
-				draw_string(ThemeDB.fallback_font, rect.position + Vector2(4, 15), "%d,%d" % [x + 1, rows - y], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#b9d8e8"))
 
 	# Draw walls on top of the grid.
 	for wall_key in document.data["walls"]:
@@ -174,6 +167,17 @@ func _draw() -> void:
 		rows
 	)
 	_draw_icon(GOAL_ICON, goal_center, 36.0)
+
+	# Coordinates are an overlay: draw them last so objects, walls, goal
+	# markers, and the robot/goal icons can't cover them.
+	if show_coordinates:
+		for x in range(cols):
+			for y in range(rows):
+				var rect := Rect2(
+					Vector2(x * CELL_SIZE, (rows - 1 - y) * CELL_SIZE),
+					Vector2(CELL_SIZE, CELL_SIZE)
+				)
+				draw_string(COORDINATES_FONT, rect.position + Vector2(4, 15), "%d,%d" % [x + 1, rows - y], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#b9d8e8"))
 
 func set_tool(tool: Tool) -> void:
 	active_tool = tool
