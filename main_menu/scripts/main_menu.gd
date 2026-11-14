@@ -106,6 +106,7 @@ func _arrange_main_menu_actions() -> void:
 	var container := get_node_or_null("MenuBG/ButtonsContainer") as VBoxContainer
 	if container == null:
 		return
+
 	for index in range(["StartButton", "CustomWorldsButton", "LevelEditorButton", "Upload", "OptionsButton", "QuitButton"].size()):
 		var action := container.get_node_or_null(["StartButton", "CustomWorldsButton", "LevelEditorButton", "Upload", "OptionsButton", "QuitButton"][index])
 		if action != null:
@@ -144,11 +145,16 @@ func _update_play_button() -> void:
 	popup_play_button.disabled = not result.get("ok", false)
 
 func _on_button_start_pressed() -> void:
+	if _input_locked:
+		return
+
 	$TabMoveSound.play()
 	campaign_menu.show_campaign()
 
 
 func _open_custom_worlds() -> void:
+	if _input_locked:
+		return
 
 	# refreshes the dropdown in case new levels were added since the menu loaded the first time
 	# refreshes the campaign levels before showing popup
@@ -162,8 +168,10 @@ func _open_custom_worlds() -> void:
 
 
 func _on_options_button_pressed() -> void:
-	$TabMoveSound.play()
+	if _input_locked:
+		return
 
+	$TabMoveSound.play()
 	if options_popup != null:
 		options_popup.show()
 
@@ -176,8 +184,8 @@ var _input_locked := false
 func _lock_menu_input() -> void:
 	if _input_locked:
 		return
-	_input_locked = true
 
+	_input_locked = true
 	var container := get_node_or_null("MenuBG/ButtonsContainer")
 	if container != null:
 		for child in container.get_children():
@@ -202,6 +210,7 @@ func _on_quit_button_pressed() -> void:
 	# prevents the quit sequence from running 2 times if the button gets clicked again during the delay
 	if _quitting:
 		return
+
 	_quitting = true
 	_lock_menu_input()
 	$LoseSound.play()
@@ -210,19 +219,27 @@ func _on_quit_button_pressed() -> void:
 
 
 func _on_upload_level_button_pressed() -> void:
-	$TabMoveSound.play()
+	if _input_locked:
+		return
 
+	$TabMoveSound.play()
 	if level_file_dialog != null:
 		level_file_dialog.popup_centered_ratio(0.75)
 
 
 func _on_level_editor_button_pressed() -> void:
+	if _input_locked:
+		return
+
 	$TabMoveSound.play()
 	get_tree().change_scene_to_file("res://level_editor/scenes/level_editor.tscn")
 
 
 # this will copy the selected file into the custom levels folder and refreshes the dropdown
 func _on_level_file_selected(path: String) -> void:
+	if _input_locked:
+		return
+
 	var real_custom_dir := ProjectSettings.globalize_path(CUSTOM_LEVELS_DIR)
 	DirAccess.make_dir_recursive_absolute(real_custom_dir)
 
