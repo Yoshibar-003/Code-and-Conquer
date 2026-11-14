@@ -26,7 +26,6 @@ const CHOICE_UNSELECTED_COLOR := Color(0.6, 0.65, 0.75)
 @onready var volume_slider: HSlider = $Panel/ScrollContainer/VBoxContainer/VolumeSlider
 @onready var music_slider: HSlider = $Panel/ScrollContainer/VBoxContainer/MusicSlider
 @onready var sfx_slider: HSlider = $Panel/ScrollContainer/VBoxContainer/SfxSlider
-@onready var grid_coordinates_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/GridCoordinatesCheck
 @onready var command_trail_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/CommandTrailCheck
 @onready var hints_check: CheckButton = $Panel/ScrollContainer/VBoxContainer/HintsCheck
 @onready var default_language_option: OptionButton = $Panel/ScrollContainer/VBoxContainer/DefaultLanguageOption
@@ -50,7 +49,7 @@ func _ready() -> void:
 		sfx_slider.value_changed.connect(_on_preference_changed)
 	if not default_language_option.item_selected.is_connected(_on_option_selected):
 		default_language_option.item_selected.connect(_on_option_selected)
-	for check in [grid_coordinates_check, command_trail_check, hints_check]:
+	for check in [command_trail_check, hints_check]:
 		if not check.toggled.is_connected(_on_toggle_changed):
 			check.toggled.connect(_on_toggle_changed)
 	if not reset_button.pressed.is_connected(_on_reset_button_pressed):
@@ -199,7 +198,6 @@ func _load_settings() -> void:
 		_choice_index["code_font_size"] = clampi(int(config.get_value("editor", "font_size", 1)), 0, 2)
 		_choice_index["editor_theme"] = clampi(int(config.get_value("editor", "theme", 0)), 0, 1)
 		_choice_index["animation_speed"] = clampi(int(config.get_value("gameplay", "animation_speed", 0)), 0, 1)
-		grid_coordinates_check.button_pressed = bool(config.get_value("learning", "show_grid_coordinates", false))
 		command_trail_check.button_pressed = bool(config.get_value("learning", "show_command_trail", true))
 		hints_check.button_pressed = bool(config.get_value("learning", "hints", true))
 		_choice_index["default_language"] = clampi(int(config.get_value("editor", "default_language", 0)), 0, 1)
@@ -209,7 +207,6 @@ func _load_settings() -> void:
 		sfx_slider.value = 1.0
 		for key in _choice_index:
 			_choice_index[key] = DEFAULT_CHOICE_INDEX[key]
-		grid_coordinates_check.button_pressed = false
 		command_trail_check.button_pressed = true
 		hints_check.button_pressed = true
 
@@ -247,7 +244,6 @@ func _save_settings() -> void:
 	config.set_value("editor", "font_size", _choice_index["code_font_size"])
 	config.set_value("editor", "theme", _choice_index["editor_theme"])
 	config.set_value("gameplay", "animation_speed", _choice_index["animation_speed"])
-	config.set_value("learning", "show_grid_coordinates", grid_coordinates_check.button_pressed)
 	config.set_value("learning", "show_command_trail", command_trail_check.button_pressed)
 	config.set_value("learning", "hints", hints_check.button_pressed)
 	config.set_value("editor", "default_language", _choice_index["default_language"])
@@ -292,7 +288,6 @@ func _on_reset_button_pressed() -> void:
 	for key in _choice_index:
 		_choice_index[key] = DEFAULT_CHOICE_INDEX[key]
 	_request_window_mode(SettingsManagerScript.WINDOW_MODE_WINDOWED)
-	grid_coordinates_check.button_pressed = false
 	command_trail_check.button_pressed = true
 	hints_check.button_pressed = true
 	_refresh_choice_visuals()

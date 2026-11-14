@@ -396,10 +396,6 @@ text = "ANIMATION SPEED"
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="GridCoordinatesCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1859547772]
-layout_mode = 2
-text = "SHOW GRID COORDINATES"
-
 [node name="CommandTrailCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1850340837]
 layout_mode = 2
 text = "SHOW COMMAND TRAIL"
