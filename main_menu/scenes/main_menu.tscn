@@ -398,7 +398,7 @@ theme_override_constants/separation = 8
 
 [node name="CommandTrailCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1850340837]
 layout_mode = 2
-text = "SHOW COMMAND TRAIL"
+text = "SHOW COMMAND TRAIL IN 2D VIEW"
 
 [node name="HintsCheck" type="CheckButton" parent="MenuBG/OptionsTab/Panel/ScrollContainer/VBoxContainer" unique_id=1647404327]
 layout_mode = 2
