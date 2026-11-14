@@ -34,6 +34,9 @@ var campaign_menu: Window
 @onready var popup_play_button: Button = get_node_or_null("MenuBG/LevelSelectPopup/VBoxContainer/PlayButton")
 @onready var level_dropdown: OptionButton = get_node_or_null("MenuBG/LevelSelectPopup/VBoxContainer/MenuButton")
 
+# used to lock input once the quit or play sequence is triggered to prevent any further interacting during the delay
+var _input_locked := false
+
 
 func _ready() -> void:
 	_arrange_main_menu_actions()
@@ -176,9 +179,6 @@ func _on_options_button_pressed() -> void:
 		options_popup.show()
 
 
-var _quitting := false
-var _input_locked := false
-
 # greys out every button and closes any open popup so nothing can be clicked
 # while the quit delay or the level-load fade is running
 func _lock_menu_input() -> void:
@@ -186,6 +186,7 @@ func _lock_menu_input() -> void:
 		return
 
 	_input_locked = true
+
 	var container := get_node_or_null("MenuBG/ButtonsContainer")
 	if container != null:
 		for child in container.get_children():
@@ -207,11 +208,9 @@ func _lock_menu_input() -> void:
 		campaign_menu.hide()
 
 func _on_quit_button_pressed() -> void:
-	# prevents the quit sequence from running 2 times if the button gets clicked again during the delay
-	if _quitting:
+	if _input_locked:
 		return
 
-	_quitting = true
 	_lock_menu_input()
 	$LoseSound.play()
 	await get_tree().create_timer(2.0).timeout
