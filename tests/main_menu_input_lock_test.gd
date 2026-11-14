@@ -43,6 +43,18 @@ func run_tests() -> void:
 	root.add_child(quit_menu)
 	await process_frame
 	check(not quit_menu._input_locked, "Menu should start unlocked")
+	# open every panel first so the lock's hide() calls are actually exercised
+	quit_menu._on_button_start_pressed()
+	quit_menu._open_custom_worlds()
+	quit_menu._on_options_button_pressed()
+	# FileDialog is exclusive by default and conflicts with the exclusive
+	# LevelSelectPopup; relax it so both can be open for this test
+	quit_menu.level_file_dialog.exclusive = false
+	quit_menu.level_file_dialog.popup_centered_ratio(0.5)
+	check(quit_menu.campaign_menu.visible, "Campaign menu should open before QUIT")
+	check(quit_menu.level_popup.visible, "Level popup should open before QUIT")
+	check(quit_menu.options_popup.visible, "Options tab should open before QUIT")
+	check(quit_menu.level_file_dialog.visible, "File dialog should open before QUIT")
 	quit_menu._on_quit_button_pressed()
 	_assert_locked(quit_menu, "After QUIT")
 	# Guarded handlers must no-op while locked
@@ -60,6 +72,11 @@ func run_tests() -> void:
 	var play_menu = load(MENU_SCENE).instantiate()
 	root.add_child(play_menu)
 	await process_frame
+	# realistic case: the level popup is open when PLAY is pressed;
+	# opening it repopulates the dropdown, which clears SelectedLevel.path,
+	# so the selection must be made afterwards like a real user would
+	play_menu._open_custom_worlds()
+	check(play_menu.level_popup.visible, "Level popup should open before PLAY")
 	root.get_node("SelectedLevel").path = TEST_LEVEL
 	play_menu._update_play_button()
 	check(not play_menu.popup_play_button.disabled, "Play button should enable for a valid level")
@@ -71,7 +88,10 @@ func run_tests() -> void:
 
 	quit_menu.queue_free()
 	play_menu.queue_free()
-	await process_frame
+	# give the audio server a few frames to release streams held by the
+	# freed menus' players before the process exits
+	for i in range(10):
+		await process_frame
 
 	Engine.time_scale = 1.0
 	print("MAIN MENU INPUT LOCK TESTS: %d failures" % failures)

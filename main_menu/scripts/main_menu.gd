@@ -283,6 +283,10 @@ func _on_play_button_pressed() -> void:
 		SelectedLevel.path = ""
 		_update_play_button()
 		return
+
+	# pin the validated path: SelectedLevel is a global and could be
+	# overwritten while the fade runs
+	var level_path := SelectedLevel.path
 	_lock_menu_input()
 	$StartSound.play()
 
@@ -297,7 +301,12 @@ func _on_play_button_pressed() -> void:
 	tween.tween_property($Mask, "modulate:a", 255.0, 1.2)
 
 	await get_tree().create_timer(2.2).timeout
-	get_tree().change_scene_to_file("res://workstation/scenes/workstation.tscn")
+	SelectedLevel.path = level_path
+	var error := get_tree().change_scene_to_file("res://workstation/scenes/workstation.tscn")
+	if error != OK:
+		push_error("Failed to load workstation scene: " + error_string(error))
+		# the menu is faded out and locked; reload it so the player isn't stuck
+		get_tree().reload_current_scene()
 
 
 func _on_level_select_popup_close_requested() -> void:
