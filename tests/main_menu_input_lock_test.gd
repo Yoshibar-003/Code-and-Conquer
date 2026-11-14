@@ -34,6 +34,10 @@ func _assert_locked(menu, label: String) -> void:
 	check(not menu.campaign_menu.visible, label + ": campaign menu should be hidden")
 
 func run_tests() -> void:
+	# near-zero time scale stretches the handlers' 2s/2.2s SceneTreeTimers so
+	# they cannot fire (quit / scene change) before this test reports its result
+	Engine.time_scale = 0.0001
+
 	# QUIT locks the whole menu during its exit delay
 	var quit_menu = load(MENU_SCENE).instantiate()
 	root.add_child(quit_menu)
@@ -65,5 +69,10 @@ func run_tests() -> void:
 	play_menu._on_quit_button_pressed()
 	check(play_menu._input_locked, "Input should stay locked after stray handler calls")
 
+	quit_menu.queue_free()
+	play_menu.queue_free()
+	await process_frame
+
+	Engine.time_scale = 1.0
 	print("MAIN MENU INPUT LOCK TESTS: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
