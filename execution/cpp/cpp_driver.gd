@@ -128,7 +128,7 @@ func compile_program() -> Dictionary:
 		var runtime_args := args.duplicate()
 		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_object])
 		if OS.execute(compiler, runtime_args, output, true) != 0:
-			return {"ok": false, "output": "\n".join(output), "reason": "compile_error", "exe_path": ""}
+			return {"ok": false, "output": "\n".join(output), "reason": "runtime_error", "exe_path": ""}
 		var runtime_object_hash := FileAccess.get_sha256(runtime_object)
 		if runtime_object_hash.is_empty():
 			return {

@@ -387,6 +387,9 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 			"prepare_error", "internal_error":
 				log_error(raw_output)
 				_set_status("Build setup failed", "error")
+			"runtime_error":
+				log_error(raw_output)
+				_set_status("C++ runtime build failed", "error")
 			_:
 				log_error(compiler.remap_diagnostics(raw_output, line_offset))
 				_set_status("Compile failed", "error")
