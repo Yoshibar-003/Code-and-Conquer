@@ -1,0 +1,69 @@
+extends SceneTree
+
+const MENU_SCENE := "res://main_menu/scenes/main_menu.tscn"
+const TEST_LEVEL := "res://data/campaign_levels/campaign/01_first_steps.json"
+
+var failures := 0
+
+func check(condition: bool, message: String) -> void:
+	if not condition:
+		failures += 1
+		push_error(message)
+
+func _initialize() -> void:
+	call_deferred("run_tests")
+
+func _menu_buttons(menu) -> Array:
+	var buttons: Array = []
+	var container = menu.get_node_or_null("MenuBG/ButtonsContainer")
+	if container != null:
+		for child in container.get_children():
+			if child is BaseButton:
+				buttons.append(child)
+	return buttons
+
+func _assert_locked(menu, label: String) -> void:
+	check(menu._input_locked, label + ": input should be locked")
+	for button in _menu_buttons(menu):
+		check(button.disabled, label + ": menu button should be disabled")
+	check(menu.popup_play_button.disabled, label + ": play button should be disabled")
+	check(menu.level_dropdown.disabled, label + ": level dropdown should be disabled")
+	check(not menu.level_popup.visible, label + ": level popup should be hidden")
+	check(not menu.options_popup.visible, label + ": options popup should be hidden")
+	check(not menu.level_file_dialog.visible, label + ": file dialog should be hidden")
+	check(not menu.campaign_menu.visible, label + ": campaign menu should be hidden")
+
+func run_tests() -> void:
+	# QUIT locks the whole menu during its exit delay
+	var quit_menu = load(MENU_SCENE).instantiate()
+	root.add_child(quit_menu)
+	await process_frame
+	check(not quit_menu._input_locked, "Menu should start unlocked")
+	quit_menu._on_quit_button_pressed()
+	_assert_locked(quit_menu, "After QUIT")
+	# Guarded handlers must no-op while locked
+	quit_menu._on_button_start_pressed()
+	quit_menu._open_custom_worlds()
+	quit_menu._on_level_editor_button_pressed()
+	quit_menu._on_options_button_pressed()
+	quit_menu._on_upload_level_button_pressed()
+	quit_menu._on_quit_button_pressed()
+	check(not quit_menu.campaign_menu.visible, "Start must not reopen campaign while locked")
+	_assert_locked(quit_menu, "After stray handler calls")
+
+	# PLAY locks the menu during the load fade and rejects re-entry,
+	# including a stray QUIT during the fade
+	var play_menu = load(MENU_SCENE).instantiate()
+	root.add_child(play_menu)
+	await process_frame
+	root.get_node("SelectedLevel").path = TEST_LEVEL
+	play_menu._update_play_button()
+	check(not play_menu.popup_play_button.disabled, "Play button should enable for a valid level")
+	play_menu._on_play_button_pressed()
+	_assert_locked(play_menu, "After PLAY")
+	play_menu._on_play_button_pressed()
+	play_menu._on_quit_button_pressed()
+	check(play_menu._input_locked, "Input should stay locked after stray handler calls")
+
+	print("MAIN MENU INPUT LOCK TESTS: %d failures" % failures)
+	quit(0 if failures == 0 else 1)
