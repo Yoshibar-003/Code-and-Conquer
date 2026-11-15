@@ -110,6 +110,7 @@ var _ipc_server = null
 var _subprocess_pid: int = -1
 var _sandbox_run_id: String = ""
 var _sandbox_cleanup_token: String = ""
+var _sandbox_cleanup_epoch: int = 0  # bumped on new credentials and each cleanup; stale cleanups abort
 var _ipc_active: bool = false
 var _ipc_loop_running: bool = false
 var _run_pending: bool = false
@@ -1293,23 +1294,34 @@ func _cleanup_sandbox_run() -> void:
 	if _sandbox_run_id.is_empty() or _sandbox_cleanup_token.is_empty():
 		return
 
+	# Callers don't await this function, so the awaits below let a new run
+	# replace _sandbox_run_id/_sandbox_cleanup_token. Capture the credentials
+	# and claim an epoch so retries can't delete a newer run's folder and a
+	# superseded cleanup aborts instead of racing the new one.
+	_sandbox_cleanup_epoch += 1
+	var epoch := _sandbox_cleanup_epoch
+	var run_id := _sandbox_run_id
+	var token := _sandbox_cleanup_token
 	var cleanup: Dictionary = {}
 
 	for attempt in range(5):
-		cleanup = sandbox_worker.delete_run_directory(
-			_sandbox_run_id,
-			_sandbox_cleanup_token
-		)
+		cleanup = sandbox_worker.delete_run_directory(run_id, token)
 
 		if cleanup.ok:
-			_sandbox_run_id = ""
-			_sandbox_cleanup_token = ""
+			# Only clear the members if a newer run hasn't claimed them.
+			if _sandbox_run_id == run_id and _sandbox_cleanup_token == token:
+				_sandbox_run_id = ""
+				_sandbox_cleanup_token = ""
 			return
 
 		# Async sleep so retries don't freeze the main thread. If the tree is
 		# shutting down (window close), the timer may never fire, which is
 		# fine since the process is exiting anyway.
 		await get_tree().create_timer(0.25).timeout
+
+		# A new run (or another cleanup) superseded this one while we slept.
+		if _sandbox_cleanup_epoch != epoch:
+			return
 
 	log_warning(
 		"Could not remove secure run folder after retries: "
@@ -1547,6 +1559,7 @@ func _run_pipeline() -> void:
 	log_line("Secure run folder prepared.")
 	_sandbox_run_id = sandbox_run_id
 	_sandbox_cleanup_token = sandbox_cleanup_token
+	_sandbox_cleanup_epoch += 1  # abort any cleanup still retrying for the old run
 
 	var sandbox_ipc_endpoint := ""
 	if OS.get_name() == "Windows":
