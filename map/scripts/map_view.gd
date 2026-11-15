@@ -874,39 +874,12 @@ func check_win_condition(gx: int, gy: int) -> void:
 	level_complete.emit()
 
 
-## Returns how many objects must still be carried at the finish.
-## `require_carry_object` is supported for levels created before carry modes existed.
+## Returns the minimum number of each object that must be carried at the finish.
+## `require_carry` is a Dictionary of {object_name: count}.
 func _get_carry_requirement() -> Dictionary:
 	if not level_data.has("goal"):
 		return {}
-	var goal: Dictionary = level_data["goal"]
-	if goal.has("require_carry_object"):
-		var legacy_object := str(goal["require_carry_object"])
-		return {legacy_object: 1} if not legacy_object.is_empty() else {}
-
-	var mode := str(goal.get("require_carry", "none"))
-	if mode == "none":
-		return {}
-	if mode == "apple":
-		return {"apple": 1}
-	if mode == "token":
-		return {"token": 1}
-
-	var required: Dictionary = {}
-	for tile_objects in level_data.get("objects", {}).values():
-		if not (tile_objects is Dictionary):
-			continue
-		for object_name in tile_objects:
-			if mode == "all_apples" and object_name != "apple":
-				continue
-			if mode == "all_tokens" and object_name != "token":
-				continue
-			if mode == "all_apples_and_tokens" and object_name != "apple" and object_name != "token":
-				continue
-			if mode != "all_apples" and mode != "all_tokens" and mode != "all_apples_and_tokens":
-				continue
-			required[object_name] = int(required.get(object_name, 0)) + int(tile_objects[object_name])
-	return required
+	return preload("res://map/scripts/carry_requirements.gd").normalize(level_data["goal"].get("require_carry", {}))
 
 
 # === objects ===
@@ -1006,6 +979,13 @@ func _track_cell_node(node: Node, key: String) -> void:
 		_objects_by_cell[key] = []
 	_objects_by_cell[key].append(node)
 
+## Computes a uniform sprite scale so any object texture renders at roughly
+## one tile-sized visual (200px), without shrinking already-small icons.
+func _object_sprite_scale(tex: Texture2D) -> float:
+	var largest_side := maxf(float(tex.get_width()), float(tex.get_height()))
+	return minf(5.0, 200.0 / maxf(largest_side, 1.0))
+
+
 func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var sprite := Sprite2D.new()
 	var tex: Texture2D
@@ -1018,9 +998,7 @@ func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 		sprite.texture = tex
 		# Old object art was tiny, while the new token icon is high-resolution.
 		# Cap every object at one tile-sized visual without making old icons smaller.
-		var largest_side := maxf(float(tex.get_width()), float(tex.get_height()))
-		var scale_factor := minf(5.0, 200.0 / maxf(largest_side, 1.0))
-		sprite.scale = Vector2.ONE * scale_factor
+		sprite.scale = Vector2.ONE * _object_sprite_scale(tex)
 	else:
 		sprite.scale = Vector2(5.0, 5.0)
 	var grid_pos = object_grid_position(gx, gy + 1)
@@ -1041,9 +1019,11 @@ func _spawn_goal_marker(object_name: String, gx: int, gy: int, satisfied: bool) 
 	else:
 		tex = load("res://assets/objects/" + object_name + "_goal.png") as Texture2D
 		_goal_textures[object_name] = tex
-	if tex:
+	if tex != null:
 		sprite.texture = tex
-	sprite.scale = Vector2(4.8, 4.8)
+		sprite.scale = Vector2.ONE * _object_sprite_scale(tex)
+	else:
+		sprite.scale = Vector2(4.8, 4.8)
 
 	if satisfied:
 		sprite.modulate = Color(0.35, 0.9, 0.45, 0.55)

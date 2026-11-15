@@ -186,6 +186,94 @@ func get_python_pipe_bootstrap(pipe_name: String) -> String:
 	return "\n".join(lines)
 
 
+func get_python_unix_bootstrap(socket_path: String) -> String:
+	var escaped_socket_path := socket_path.replace("\\", "\\\\").replace("'", "\\'")
+
+	var lines := [
+		"import socket as _socket, sys, traceback, types, time",
+		"",
+		"_sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)",
+		"for _attempt in range(100):",
+		"	try:",
+		"		_sock.connect('%s')" % escaped_socket_path,
+		"		break",
+		"	except OSError:",
+		"		if _attempt == 99:",
+		"			raise",
+		"		time.sleep(0.1)",
+		"_pipe = _sock.makefile('rwb', buffering=1)",
+		"",
+		"def _robot_send(msg):",
+		"	# Cap wire size: the worker's pipe read and the IPC line limit are 8192.",
+		"	# Only free-text tails ([PRINT]/[ERROR]) can exceed this; protocol",
+		"	# fields like [CMD]/[QUERY]/[LINE] are always small and at the front.",
+		"	if len(msg) > 8000:",
+		"		msg = msg[:7997] + '...'",
+		"	_pipe.write((msg + '\\n').encode())",
+		"	_pipe.flush()",
+		"",
+		"def _robot_recv():",
+		"	_reply = _pipe.readline()",
+		"	if not _reply:",
+		"		return ''",
+		"	return _reply.decode().rstrip('\\r\\n')",
+		"",
+		"# print() calls write() once per argument, so buffer until newline.",
+		"def _robot_print(text):",
+		"	# Truncate so '[PRINT] ' + text stays under the 8000-char send cap;",
+		"	# an oversized message would kill the worker's 8KB pipe read.",
+		"	if len(text) > 7989:",
+		"		text = text[:7989] + '...'",
+		"	_robot_send('[PRINT] ' + text)",
+		"class _UnixStdout:",
+		"	def __init__(self):",
+		"		self._pending = ''",
+		"	def write(self, text):",
+		"		self._pending += text",
+		"		while '\\n' in self._pending:",
+		"			_line, self._pending = self._pending.split('\\n', 1)",
+		"			if _line:",
+		"				_robot_print(_line.rstrip('\\r'))",
+		"	def flush(self):",
+		"		if self._pending:",
+		"			_robot_print(self._pending)",
+		"			self._pending = ''",
+		"",
+		"sys.stdout = _UnixStdout()",
+		"",
+		"_robot_mod = types.ModuleType('robot')",
+		"_robot_exports = []",
+		"",
+		"def _mk_cmd(_cmd):",
+		"	def _fn():",
+		"		# sys._getframe(1) is the caller's frame; f_lineno is the student's call site.",
+		"		_robot_send('[CMD] ' + _cmd + ' [LINE] ' + str(sys._getframe(1).f_lineno))",
+		"		_robot_recv()",
+		"	return _fn",
+		"",
+		"def _mk_sensor(_query):",
+		"	def _fn():",
+		"		_robot_send('[QUERY] ' + _query + ' [LINE] ' + str(sys._getframe(1).f_lineno))",
+		"		return _robot_recv() == 'true'",
+		"	return _fn",
+		"",
+	]
+
+	for cmd in COMMANDS:
+		lines.append("setattr(_robot_mod, '%s', _mk_cmd('%s'))" % [cmd.name, cmd.cmd])
+		lines.append("_robot_exports.append('%s')" % cmd.name)
+
+	for sensor in SENSORS:
+		lines.append("setattr(_robot_mod, '%s', _mk_sensor('%s'))" % [sensor.name, sensor.query])
+		lines.append("_robot_exports.append('%s')" % sensor.name)
+
+	lines.append("_robot_mod.__all__ = _robot_exports")
+	lines.append("sys.modules['robot'] = _robot_mod")
+	lines.append("")
+
+	return "\n".join(lines)
+
+
 ## Error-catching wrapper around the student's code. Always sends [DONE].
 func get_python_runner(student_code: String) -> String:
 	var escaped := student_code.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
@@ -217,6 +305,23 @@ func get_cpp_header() -> String:
 	for sensor in SENSORS:
 		lines.append("bool %s(int __src_line = 0);" % sensor.name)
 	return "\n".join(lines)
+
+
+func _cpp_command_implementation_lines() -> Array:
+	var lines := []
+	for cmd in COMMANDS:
+		lines.append("void %s(int __src_line) {" % cmd.name)
+		lines.append("    __robot_send(\"[CMD] %s [LINE] \" + std::to_string(__src_line));" % cmd.cmd)
+		lines.append("    __robot_recv();")
+		lines.append("}")
+		lines.append("")
+	for sensor in SENSORS:
+		lines.append("bool %s(int __src_line) {" % sensor.name)
+		lines.append("    __robot_send(\"[QUERY] %s [LINE] \" + std::to_string(__src_line));" % sensor.query)
+		lines.append("    return __robot_recv() == \"true\";")
+		lines.append("}")
+		lines.append("")
+	return lines
 
 
 ## robot_runtime.cpp — cross-platform socket bootstrap + all implementations.
@@ -286,18 +391,7 @@ func get_cpp_source(port: int, token: String) -> String:
 		"} __robot_lifetime;",
 		"",
 	]
-	for cmd in COMMANDS:
-		lines.append("void %s(int __src_line) {" % cmd.name)
-		lines.append("    __robot_send(\"[CMD] %s [LINE] \" + std::to_string(__src_line));" % cmd.cmd)
-		lines.append("    __robot_recv();")
-		lines.append("}")
-		lines.append("")
-	for sensor in SENSORS:
-		lines.append("bool %s(int __src_line) {" % sensor.name)
-		lines.append("    __robot_send(\"[QUERY] %s [LINE] \" + std::to_string(__src_line));" % sensor.query)
-		lines.append("    return __robot_recv() == \"true\";")
-		lines.append("}")
-		lines.append("")
+	lines.append_array(_cpp_command_implementation_lines())
 	return "\n".join(lines)
 
 
@@ -359,21 +453,83 @@ func get_cpp_pipe_source() -> String:
 		"} __robot_lifetime;",
 		"",
 	]
+	lines.append_array(_cpp_command_implementation_lines())
+	return "\n".join(lines)
 
-	for cmd in COMMANDS:
-		lines.append("void %s(int __src_line) {" % cmd.name)
-		lines.append("    __robot_send(\"[CMD] %s [LINE] \" + std::to_string(__src_line));" % cmd.cmd)
-		lines.append("    __robot_recv();")
-		lines.append("}")
-		lines.append("")
 
-	for sensor in SENSORS:
-		lines.append("bool %s(int __src_line) {" % sensor.name)
-		lines.append("    __robot_send(\"[QUERY] %s [LINE] \" + std::to_string(__src_line));" % sensor.query)
-		lines.append("    return __robot_recv() == \"true\";")
-		lines.append("}")
-		lines.append("")
-
+func get_cpp_unix_source() -> String:
+	var lines := [
+		"#include <fstream>",
+		"#include \"robot.hpp\"",
+		"#include <string>",
+		"#include <cstdint>",
+		"#include <cstring>",
+		"#include <cerrno>",
+		"#include <sys/socket.h>",
+		"#include <sys/un.h>",
+		"#include <unistd.h>",
+		"",
+		"static int __robot_sock = -1;",
+		"static std::string __robot_buf;",
+		"",
+		"static void __robot_connect() {",
+		"    std::ifstream endpoint_file(\"connection.txt\");",
+		"    std::string endpoint;",
+		"    std::getline(endpoint_file, endpoint);",
+		"    while (!endpoint.empty() && (endpoint.back() == '\\n' || endpoint.back() == '\\r')) endpoint.pop_back();",
+		"    if (endpoint.empty() || endpoint.size() >= sizeof(((sockaddr_un*)nullptr)->sun_path)) return;",
+		"    for (int attempt = 0; attempt < 100; ++attempt) {",
+		"        int sock = socket(AF_UNIX, SOCK_STREAM, 0);",
+		"        if (sock < 0) return;",
+		"        sockaddr_un addr{};",
+		"        addr.sun_family = AF_UNIX;",
+		"        std::strncpy(addr.sun_path, endpoint.c_str(), sizeof(addr.sun_path) - 1);",
+		"        if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {",
+		"            __robot_sock = sock;",
+		"            return;",
+		"        }",
+		"        close(sock);",
+		"        usleep(100000);",
+		"    }",
+		"}",
+		"",
+		"static void __robot_send(const std::string& message) {",
+		"    if (__robot_sock < 0) return;",
+		"    std::string line = message + \"\\n\";",
+		"    size_t sent = 0;",
+		"    while (sent < line.size()) {",
+		"        ssize_t n = send(__robot_sock, line.data() + sent, line.size() - sent, 0);",
+		"        if (n <= 0) return;",
+		"        sent += static_cast<size_t>(n);",
+		"    }",
+		"}",
+		"",
+		"static std::string __robot_recv() {",
+		"    while (true) {",
+		"        auto pos = __robot_buf.find('\\n');",
+		"        if (pos != std::string::npos) {",
+		"            std::string line = __robot_buf.substr(0, pos);",
+		"            __robot_buf = __robot_buf.substr(pos + 1);",
+		"            if (!line.empty() && line.back() == '\\r') line.pop_back();",
+		"            return line;",
+		"        }",
+		"        char tmp[256];",
+		"        ssize_t n = recv(__robot_sock, tmp, sizeof(tmp), 0);",
+		"        if (n <= 0) return \"\";",
+		"        __robot_buf.append(tmp, static_cast<size_t>(n));",
+		"    }",
+		"}",
+		"",
+		"struct __RobotLifetime {",
+		"    __RobotLifetime() { __robot_connect(); }",
+		"    ~__RobotLifetime() {",
+		"        __robot_send(\"[DONE]\");",
+		"        if (__robot_sock >= 0) close(__robot_sock);",
+		"    }",
+		"} __robot_lifetime;",
+		"",
+	]
+	lines.append_array(_cpp_command_implementation_lines())
 	return "\n".join(lines)
 
 

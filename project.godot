@@ -23,14 +23,13 @@ default_bus_layout="res://default_bus_layout.tres"
 SelectedLevel="*uid://dc3jimritl1hh"
 EventManager="*uid://cl00riv6kfaao"
 SettingsManager="*res://config/settings_manager.gd"
+AudioManager="*res://config/audio_manager.gd"
 
 [display]
 
 window/size/viewport_width=1920
 window/size/viewport_height=1080
-window/size/mode=3
 window/stretch/mode="canvas_items"
-window/mode=3
 
 [gui]
 
