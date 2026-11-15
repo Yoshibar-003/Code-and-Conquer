@@ -350,9 +350,29 @@ func _prune_stale_cpp_build_dirs(root: String, keep_hash: String) -> void:
 		if child == keep_hash:
 			continue
 		var child_path := root.path_join(child)
-		var modified: int = dir.get_modified_time(child_path)
+		var modified := _newest_file_time(child_path)
 		if modified > 0 and modified < cutoff:
 			_remove_dir_recursive(child_path)
+
+
+# DirAccess can't stat a directory's mtime and FileAccess.get_modified_time only
+# works on files, so a build dir's age is the newest mtime of the files inside it.
+# Returns 0 when nothing can be stat'ed; the caller treats that as "unknown" and
+# leaves the dir alone rather than guessing.
+func _newest_file_time(path: String) -> int:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return 0
+	var newest := 0
+	for file_name in dir.get_files():
+		var modified := FileAccess.get_modified_time(path.path_join(file_name))
+		if modified > newest:
+			newest = modified
+	for dir_name in dir.get_directories():
+		var nested := _newest_file_time(path.path_join(dir_name))
+		if nested > newest:
+			newest = nested
+	return newest
 
 
 func _remove_dir_recursive(path: String) -> void:
