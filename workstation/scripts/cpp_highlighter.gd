@@ -19,6 +19,7 @@ var _kind := ""
 # caret moves, resize) (doesn't make edits themselves cheaper). A mid-edit
 # change can show stale colors for at most one frame before the signal arrives.
 var _verified_upto := 0
+var _font_color := Color.WHITE
 
 func _update_cache() -> void:
 	var editor := get_text_edit()
@@ -72,14 +73,15 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 	return _lines[line]
 
 func _word_char(c: String) -> bool:
-	return c == "_" or c.to_lower() >= "a" and c.to_lower() <= "z" or c >= "0" and c <= "9"
+	return c == "_" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
 
 func _paint(result: Dictionary, start: int, end: int, color: Color) -> void:
 	result[start] = {"color": color}
-	result[end] = {"color": get_text_edit().get_theme_color("font_color")}
+	result[end] = {"color": _font_color}
 
 func _scan(line: String) -> Dictionary:
 	var result := {}
+	_font_color = get_text_edit().get_theme_color("font_color")
 	var i := 0
 	while i < line.length():
 		var start := i
