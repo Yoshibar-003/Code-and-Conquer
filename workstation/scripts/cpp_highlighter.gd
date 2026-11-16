@@ -11,11 +11,13 @@ var _lines: Array[Dictionary] = []
 var _source_lines: Array[String] = []
 var _end := ""
 var _kind := ""
+
 # Leading lines already verified identical to the current document. Lines past
-# this point are re-checked lazily per request, so validation is amortized O(1)
-# per call instead of O(file length). text_changed still clears everything, so
-# a mid-edit change above this point can show stale colors for at most one
-# frame before the signal arrives.
+# this point are re-checked lazily per request. Every edit still clears this
+# via text_changed/text_set/lines_edited_from, so the benefit is avoiding the
+# O(file length) prefix re-scan on color requests between edits (scrolling,
+# caret moves, resize) (doesn't make edits themselves cheaper). A mid-edit
+# change can show stale colors for at most one frame before the signal arrives.
 var _verified_upto := 0
 
 func _update_cache() -> void:
@@ -28,15 +30,12 @@ func _update_cache() -> void:
 		for sig in [editor.text_changed, editor.text_set]:
 			if not sig.is_connected(clear_highlighting_cache):
 				sig.connect(clear_highlighting_cache)
-			if not sig.is_connected(_clear_highlighting_cache):
-				sig.connect(_clear_highlighting_cache)
 		if not editor.lines_edited_from.is_connected(_on_lines_edited):
 			editor.lines_edited_from.connect(_on_lines_edited)
 	_clear_highlighting_cache()
 
 func _on_lines_edited(_from_line: int, _to_line: int) -> void:
 	clear_highlighting_cache()
-	_clear_highlighting_cache()
 
 func add_keyword_color(word: String, color: Color) -> void:
 	keywords[word] = color
