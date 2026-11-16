@@ -1,6 +1,7 @@
 extends RefCounted
 
 const BUILD_DIR := "user://build"
+const RUNTIME_CACHE_DIR := "user://build/runtime_cache"
 const Paths = preload("res://execution/shared/paths.gd")
 
 var _commands = preload(Paths.ROBOT_COMMANDS).new()
@@ -108,9 +109,12 @@ func compile_program() -> Dictionary:
 	var args := ["-std=c++17", "-Wall", "-Wextra"]
 	if OS.get_name() == "Windows":
 		args.append("-static")
+	var link_flags: Array[String] = ["-s"]
+	if OS.get_name() == "Windows":
+		link_flags.append("-lws2_32")
 	var runtime_key := (_runtime_assets.platform_tag() + compiler + str(_compiler_version_output) + str(args) + FileAccess.get_file_as_string(robot_cpp)
 		+ FileAccess.get_file_as_string(_active_build_dir.path_join("robot.hpp"))).sha256_text()
-	var build_key := (runtime_key + FileAccess.get_file_as_string(student_cpp)).sha256_text()
+	var build_key := (runtime_key + FileAccess.get_file_as_string(student_cpp) + str(link_flags)).sha256_text()
 	var cache_path := _active_build_dir.path_join("compile_cache.cfg")
 	var cache := ConfigFile.new()
 	cache.load(cache_path)
@@ -119,21 +123,69 @@ func compile_program() -> Dictionary:
 			and cache.get_value("build", "exe_hash", "") == exe_hash:
 		return {"ok": true, "output": "", "exe_path": exe, "cached": true}
 
-	# Student edits reuse the compiled robot runtime.
+	# Student edits reuse the compiled robot runtime. The object is shared
+	# across build dirs under user://build/runtime_cache, then materialized into
+	# this build dir so the existing per-build cache and link path still work.
 	var runtime_object := _active_build_dir.path_join("robot_runtime.o")
+	var shared_runtime_object := _shared_runtime_object_path(runtime_key)
+	var shared_runtime_hash_path := shared_runtime_object + ".sha256"
 	var runtime_reused := false
+	var runtime_object_hash := ""
 	if cache.get_value("runtime", "key", "") == runtime_key and FileAccess.file_exists(runtime_object):
-		runtime_reused = cache.get_value("runtime", "object_hash", "") == FileAccess.get_sha256(runtime_object)
+		runtime_object_hash = FileAccess.get_sha256(runtime_object)
+		runtime_reused = cache.get_value("runtime", "object_hash", "") == runtime_object_hash
+	if not runtime_reused and _shared_runtime_object_valid(shared_runtime_object, shared_runtime_hash_path):
+		var expected_hash := FileAccess.get_file_as_string(shared_runtime_hash_path).strip_edges()
+		if FileAccess.file_exists(runtime_object):
+			DirAccess.remove_absolute(runtime_object)
+		if DirAccess.copy_absolute(shared_runtime_object, runtime_object) == OK:
+			runtime_object_hash = FileAccess.get_sha256(runtime_object)
+			runtime_reused = runtime_object_hash == expected_hash
+			if runtime_reused:
+				cache.set_value("runtime", "key", runtime_key)
+				cache.set_value("runtime", "object_hash", runtime_object_hash)
+		if not runtime_reused:
+			DirAccess.remove_absolute(runtime_object)
 	if not runtime_reused:
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(RUNTIME_CACHE_DIR))
+		var runtime_tmp := shared_runtime_object + ".tmp"
 		var runtime_args := args.duplicate()
-		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_object])
+		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_tmp])
 		if OS.execute(compiler, runtime_args, output, true) != 0:
+			DirAccess.remove_absolute(runtime_tmp)
 			return {"ok": false, "output": "\n".join(output), "reason": "runtime_error", "exe_path": ""}
-		var runtime_object_hash := FileAccess.get_sha256(runtime_object)
+		runtime_object_hash = FileAccess.get_sha256(runtime_tmp)
 		if runtime_object_hash.is_empty():
+			DirAccess.remove_absolute(runtime_tmp)
 			return {
 				"ok": false,
 				"output": "Compiled robot runtime could not be hashed.",
+				"reason": "internal_error",
+				"exe_path": ""
+			}
+		if FileAccess.file_exists(shared_runtime_object):
+			DirAccess.remove_absolute(shared_runtime_object)
+		if DirAccess.rename_absolute(runtime_tmp, shared_runtime_object) != OK:
+			DirAccess.remove_absolute(runtime_tmp)
+			return {
+				"ok": false,
+				"output": "Compiled robot runtime could not be cached.",
+				"reason": "internal_error",
+				"exe_path": ""
+			}
+		if not _write_file(shared_runtime_hash_path, runtime_object_hash):
+			return {
+				"ok": false,
+				"output": "Compiled robot runtime could not be cached.",
+				"reason": "internal_error",
+				"exe_path": ""
+			}
+		if FileAccess.file_exists(runtime_object):
+			DirAccess.remove_absolute(runtime_object)
+		if DirAccess.copy_absolute(shared_runtime_object, runtime_object) != OK:
+			return {
+				"ok": false,
+				"output": "Compiled robot runtime could not be copied into the build directory.",
 				"reason": "internal_error",
 				"exe_path": ""
 			}
@@ -148,8 +200,7 @@ func compile_program() -> Dictionary:
 	if FileAccess.file_exists(exe):
 		DirAccess.remove_absolute(exe)
 	args.append_array([student_cpp, runtime_object, "-o", exe])
-	if OS.get_name() == "Windows":
-		args.append("-lws2_32")
+	args.append_array(link_flags)
 
 	# Discard runtime compile output so its warnings aren't misattributed to student code.
 	output.clear()
@@ -236,3 +287,14 @@ func _write_file(path: String, text: String) -> bool:
 		return false
 	f.close()
 	return true
+
+
+func _shared_runtime_object_path(runtime_key: String) -> String:
+	return ProjectSettings.globalize_path(RUNTIME_CACHE_DIR).path_join("robot_runtime_%s.o" % runtime_key)
+
+
+func _shared_runtime_object_valid(object_path: String, hash_path: String) -> bool:
+	if not FileAccess.file_exists(object_path) or not FileAccess.file_exists(hash_path):
+		return false
+	var expected_hash := FileAccess.get_file_as_string(hash_path).strip_edges()
+	return not expected_hash.is_empty() and FileAccess.get_sha256(object_path) == expected_hash
