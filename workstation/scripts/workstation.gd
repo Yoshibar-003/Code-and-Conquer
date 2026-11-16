@@ -430,13 +430,18 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 				_set_status("Compile failed", "error")
 		return
 
+	var same_as_last_check := not checked_code.is_empty() and source == checked_code
 	checked_code = source
 	has_checked_code = true
 	checked_cpp_executable = str(build.get("exe_path", ""))
 	checked_cpp_line_offset = line_offset
 	run_button.disabled = false
 	_set_status("C++ compiled successfully — ready to run.", "")
-	log_line("C++ code unchanged — previous build reused." if build.get("cached", false) else "C++ compilation passed.")
+	if build.get("cached", false):
+		log_line("C++ code unchanged — previous build reused." if same_as_last_check
+			else "C++ compilation passed (reused an earlier build of this code).")
+	else:
+		log_line("C++ compilation passed.")
 
 func _setup_campaign_ui() -> void:
 	campaign_panel = VBoxContainer.new()
