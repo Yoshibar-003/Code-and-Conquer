@@ -2546,7 +2546,7 @@ func _switch_level() -> void:
 
 	print("Selected level path: ", new_path)
 
-	var loaded: bool = _load_level_scene(true, false)
+	var loaded: bool = _load_level_scene(false, false)
 
 	if not loaded:
 		SelectedLevel.path = _loaded_level_path
