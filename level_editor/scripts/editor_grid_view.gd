@@ -177,7 +177,7 @@ func _draw() -> void:
 					Vector2(x * CELL_SIZE, (rows - 1 - y) * CELL_SIZE),
 					Vector2(CELL_SIZE, CELL_SIZE)
 				)
-				draw_string(COORDINATES_FONT, rect.position + Vector2(4, 15), "%d,%d" % [x + 1, rows - y], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#b9d8e8"))
+				draw_string(COORDINATES_FONT, rect.position + Vector2(4, 15), "%d,%d" % [x + 1, y + 1], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#b9d8e8"))
 
 func set_tool(tool: Tool) -> void:
 	active_tool = tool
