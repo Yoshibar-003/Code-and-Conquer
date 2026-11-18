@@ -34,6 +34,9 @@ var campaign_menu: Window
 @onready var popup_play_button: Button = get_node_or_null("MenuBG/LevelSelectPopup/VBoxContainer/PlayButton")
 @onready var level_dropdown: OptionButton = get_node_or_null("MenuBG/LevelSelectPopup/VBoxContainer/MenuButton")
 
+# used to lock input once the quit or play sequence is triggered to prevent any further interacting during the delay
+var _input_locked := false
+
 
 func _ready() -> void:
 	_arrange_main_menu_actions()
@@ -106,6 +109,7 @@ func _arrange_main_menu_actions() -> void:
 	var container := get_node_or_null("MenuBG/ButtonsContainer") as VBoxContainer
 	if container == null:
 		return
+
 	for index in range(["StartButton", "CustomWorldsButton", "LevelEditorButton", "Upload", "OptionsButton", "QuitButton"].size()):
 		var action := container.get_node_or_null(["StartButton", "CustomWorldsButton", "LevelEditorButton", "Upload", "OptionsButton", "QuitButton"][index])
 		if action != null:
@@ -130,6 +134,10 @@ func _update_play_button() -> void:
 	if popup_play_button == null:
 		return
 
+	if _input_locked:
+		popup_play_button.disabled = true
+		return
+
 	if SelectedLevel.path.is_empty():
 		popup_play_button.disabled = true
 		return
@@ -140,11 +148,18 @@ func _update_play_button() -> void:
 	popup_play_button.disabled = not result.get("ok", false)
 
 func _on_button_start_pressed() -> void:
-	$TabMoveSound.play()
+	if _input_locked:
+		return
+
+	AudioManager.play_ui("menu_move")
 	campaign_menu.show_campaign()
 
 
 func _open_custom_worlds() -> void:
+	if _input_locked:
+		return
+
+	AudioManager.play_ui("menu_move")
 
 	# refreshes the dropdown in case new levels were added since the menu loaded the first time
 	# refreshes the campaign levels before showing popup
@@ -158,37 +173,75 @@ func _open_custom_worlds() -> void:
 
 
 func _on_options_button_pressed() -> void:
-	$TabMoveSound.play()
+	if _input_locked:
+		return
 
+	AudioManager.play_ui("menu_move")
 	if options_popup != null:
 		options_popup.show()
 
 
-var _quitting := false
-func _on_quit_button_pressed() -> void:
-	# prevents the quit sequence from running 2 times if the button gets clicked again during the delay
-	if _quitting:
+# greys out every button and closes any open popup so nothing can be clicked
+# while the quit delay or the level-load fade is running
+func _lock_menu_input() -> void:
+	if _input_locked:
 		return
-	_quitting = true
-	$LoseSound.play()
+
+	_input_locked = true
+
+	var container := get_node_or_null("MenuBG/ButtonsContainer")
+	if container != null:
+		for child in container.get_children():
+			if child is BaseButton:
+				child.disabled = true
+
+	if popup_play_button != null:
+		popup_play_button.disabled = true
+	if level_dropdown != null:
+		level_dropdown.disabled = true
+
+	if level_popup != null:
+		level_popup.hide()
+	if options_popup != null:
+		options_popup.hide()
+	if level_file_dialog != null:
+		level_file_dialog.hide()
+	if campaign_menu != null:
+		campaign_menu.hide()
+
+
+func _on_quit_button_pressed() -> void:
+	if _input_locked:
+		return
+
+	_lock_menu_input()
+	AudioManager.play_ui("menu_lose")
 	await get_tree().create_timer(2.0).timeout
 	get_tree().quit()
 
 
 func _on_upload_level_button_pressed() -> void:
-	$TabMoveSound.play()
+	if _input_locked:
+		return
 
+	AudioManager.play_ui("menu_move")
 	if level_file_dialog != null:
 		level_file_dialog.popup_centered_ratio(0.75)
 
 
 func _on_level_editor_button_pressed() -> void:
-	$TabMoveSound.play()
+	if _input_locked:
+		return
+
+	AudioManager.play_ui("menu_move")
 	get_tree().change_scene_to_file("res://level_editor/scenes/level_editor.tscn")
 
 
 # this will copy the selected file into the custom levels folder and refreshes the dropdown
 func _on_level_file_selected(path: String) -> void:
+	if _input_locked:
+		return
+
 	var real_custom_dir := ProjectSettings.globalize_path(CUSTOM_LEVELS_DIR)
 	DirAccess.make_dir_recursive_absolute(real_custom_dir)
 
@@ -222,7 +275,7 @@ func _on_level_file_selected(path: String) -> void:
 
 # plays a little fade animation then loads the workstation scene
 func _on_play_button_pressed() -> void:
-	if SelectedLevel.path.is_empty():
+	if _input_locked or SelectedLevel.path.is_empty():
 		return
 
 	var validator = load(Paths.MAP_LOADER).new()
@@ -233,7 +286,11 @@ func _on_play_button_pressed() -> void:
 		SelectedLevel.path = ""
 		_update_play_button()
 		return
-	$StartSound.play()
+	# pin the validated path: SelectedLevel is a global and could be
+	# overwritten while the fade runs
+	var level_path := SelectedLevel.path
+	_lock_menu_input()
+	AudioManager.play_ui("menu_start")
 
 	if level_popup != null:
 		level_popup.hide()
@@ -246,7 +303,12 @@ func _on_play_button_pressed() -> void:
 	tween.tween_property($Mask, "modulate:a", 255.0, 1.2)
 
 	await get_tree().create_timer(2.2).timeout
-	get_tree().change_scene_to_file("res://workstation/scenes/workstation.tscn")
+	SelectedLevel.path = level_path
+	var error := get_tree().change_scene_to_file("res://workstation/scenes/workstation.tscn")
+	if error != OK:
+		push_error("Failed to load workstation scene: " + error_string(error))
+		# the menu is faded out and locked; reload it so the player isn't stuck
+		get_tree().reload_current_scene()
 
 
 func _on_level_select_popup_close_requested() -> void:

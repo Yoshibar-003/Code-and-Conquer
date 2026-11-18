@@ -156,6 +156,14 @@ theme_override_font_sizes/font_size = 12
 text = "MAP CONTROLS\nRight-click: pan mode\nLeft-drag: move map\nMouse wheel: zoom"
 autowrap_mode = 2
 
+[node name="CoordinatesCheck" type="CheckBox" parent="RightToolbar"]
+layout_mode = 2
+button_pressed = true
+theme_override_colors/font_color = Color(0.3, 0.82, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "SHOW COORDINATES"
+tooltip_text = "Show grid coordinates while editing"
+
 [node name="PlacementLabel" type="Label" parent="RightToolbar"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.3, 0.82, 1, 1)

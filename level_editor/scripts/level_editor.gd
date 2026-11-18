@@ -33,6 +33,7 @@ var _auto_accept_quit_before := true
 @onready var token_button: Button = $RightToolbar/ObjectsGrid/TokenButton
 @onready var erase_button: Button = $RightToolbar/EraseButton
 @onready var void_button: Button = $RightToolbar/VoidButton
+@onready var coordinates_check: CheckBox = $RightToolbar/CoordinatesCheck
 @onready var new_button: Button = $SidebarScroll/VBoxContainer/NewButton
 @onready var columns_input: SpinBox = $SidebarScroll/VBoxContainer/ColumnsInput
 @onready var rows_input: SpinBox = $SidebarScroll/VBoxContainer/RowsInput
@@ -56,6 +57,7 @@ func _ready() -> void:
 	grid.set_document(document)
 	grid.view_changed.connect(_layout_grid)
 	grid.objects_changed.connect(_on_grid_objects_changed)
+	grid.show_coordinates = coordinates_check.button_pressed
 	resized.connect(_layout_grid)
 	call_deferred("_layout_grid")
 
@@ -72,6 +74,7 @@ func _ready() -> void:
 	token_button.pressed.connect(_on_token_button_pressed)
 	erase_button.pressed.connect(_on_erase_button_pressed)
 	void_button.pressed.connect(func(): _select_tool(EditorGridView.Tool.VOID, void_button, "Void (Erase restores floor; start and goal stay solid)"))
+	coordinates_check.toggled.connect(_on_coordinates_toggled)
 	new_button.pressed.connect(_request_new_level)
 	resize_button.pressed.connect(_on_resize_button_pressed)
 	back_button.pressed.connect(_request_exit)
@@ -219,6 +222,11 @@ func _on_wall_button_pressed() -> void:
 
 func _on_east_wall_button_pressed() -> void:
 	_select_tool(EditorGridView.Tool.EAST_WALL, east_wall_button, "East Wall")
+
+
+func _on_coordinates_toggled(enabled: bool) -> void:
+	grid.show_coordinates = enabled
+	grid.queue_redraw()
 
 
 func _select_tool(tool: int, selected_button: Button, tool_name: String) -> void:
