@@ -125,8 +125,13 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 	_drain_pipe(stderr, output, true)
 
 	var exit_code := -1
-	if _compiler_pid > 0 and not _cancel_requested:
-		exit_code = OS.get_process_exit_code(_compiler_pid)
+	if _compiler_pid > 0:
+		# Always read the exit status, even for a cancelled/killed compile, so
+		# the child doesn't linger as an unreaped zombie. Cancelled compiles
+		# still report -1 to the caller.
+		var reaped := OS.get_process_exit_code(_compiler_pid)
+		if not _cancel_requested:
+			exit_code = reaped
 	_compiler_pid = -1
 	return exit_code
 
@@ -134,6 +139,10 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 # `final` mode is used for the post-exit drain: an empty get_line() may mean
 # "no data yet" rather than a blank line, so retry a few times before giving
 # up. Mid-run polls break on the first empty read since the next tick retries.
+# Known trade-off: get_line() returns whatever bytes are available, so a very
+# long line without a newline can stall pipe polling until more data or a
+# newline arrives; cancel() killing the process from another thread is the
+# escape hatch.
 func _drain_pipe(file: FileAccess, output: Array, final: bool = false) -> void:
 	if file == null:
 		return

@@ -9,6 +9,8 @@ static var _active: Array = []
 static var _mutex := Mutex.new()
 # Latched by cancel_all() so tasks still sitting in the WorkerThreadPool
 # queue (not yet inside run(), hence not in _active) also abort on start.
+# Never cleared: only call cancel_all() on quit paths, or every later
+# compile in the process would auto-cancel.
 static var _cancel_all_requested := false
 
 # WorkerThreadPool task callables cannot return values through

@@ -129,7 +129,7 @@ var _controls_locked: bool = false
 
 var global_level_name := ""
 var exec_speed: float = 0.5
-var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move_limit" | "cmd_limit" | "time_limit" | "done" | "error"
+var _run_outcome: String = "incomplete"  # "incomplete" = no outcome yet | "win" | "lose" | "incomplete_lose" | "move_limit" | "cmd_limit" | "time_limit" | "done" | "error"
 var _run_had_error: bool = false  # set when the subprocess emits [ERROR]
 # === execution limits ===
 # Default limits
@@ -389,8 +389,10 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 		return
 
 	WorkerThreadPool.wait_for_task_completion(_compile_task_id)
+	# Do NOT clear _compile_worker.result here: a second worker deduped onto
+	# this one polls result after _finished flips, and clearing it would make
+	# it fall through to a redundant fresh compile.
 	var build: Dictionary = _compile_worker.result
-	_compile_worker.result = {}
 	_compile_task_id = -1
 	_refresh_program_controls()
 
@@ -417,6 +419,10 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 			_:
 				log_error(compiler.remap_diagnostics(raw_output, line_offset))
 				_set_status("Compile failed", "error")
+		# A failed re-check keeps the previous checked build valid, so restore
+		# Run/Step from has_checked_code instead of leaving them disabled.
+		run_button.disabled = not has_checked_code
+		step_button.disabled = not has_checked_code
 		return
 
 	# The code editor was locked during the compile, but guard anyway:
@@ -1275,7 +1281,7 @@ func _trigger_incomplete_lose(reason: String) -> void:
 	if _has_terminal_outcome():
 		return
 	_is_handling_lose = true
-	_run_outcome = "incomplete"
+	_run_outcome = "incomplete_lose"
 	_refresh_level_limits()
 	_stop_execution()
 
@@ -2351,7 +2357,7 @@ func _run_outcome_marker() -> String:
 	match _run_outcome:
 		"win":
 			return "!"
-		"lose", "incomplete":
+		"lose", "incomplete", "incomplete_lose":
 			return "?"
 		"done":
 			return "."
