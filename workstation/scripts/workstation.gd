@@ -1462,8 +1462,6 @@ func _run_pipeline() -> void:
 	reset_button.disabled = false
 	run_button.disabled = true
 	step_button.disabled = true
-	rotate_left_btn.disabled = true
-	rotate_right_btn.disabled = true
 
 	_set_status("Compiling...", "")
 	output_box.clear()
