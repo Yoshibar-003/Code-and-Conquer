@@ -215,6 +215,9 @@ func _on_quit_button_pressed() -> void:
 		return
 
 	_lock_menu_input()
+	# Abandoned C++ compiles keep WorkerThreadPool threads busy; shutdown would
+	# wait on them, so kill them before quitting.
+	CppCompileWorker.cancel_all()
 	AudioManager.play_ui("menu_lose")
 	await get_tree().create_timer(2.0).timeout
 	get_tree().quit()
@@ -314,3 +317,10 @@ func _on_play_button_pressed() -> void:
 func _on_level_select_popup_close_requested() -> void:
 	if level_popup != null:
 		level_popup.hide()
+
+
+# Window-close quits through the default path, bypassing the Quit button, so
+# in-flight compiles must be cancelled here too or shutdown hangs on them.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		CppCompileWorker.cancel_all()

@@ -8,6 +8,8 @@ var _runtime_assets = preload(Paths.RUNTIME_ASSETS).new()
 var _active_build_dir: String = ""
 var _prepare_error: String = ""
 var _prepare_reason: String = ""
+var _cancel_requested := false
+var _compiler_pid := -1
 static var _compiler: String = ""
 static var _compiler_probed := false
 static var _compiler_version_output: Array = []
@@ -75,6 +77,89 @@ func is_available() -> bool:
 	return is_platform_supported() and detect_compiler()
 
 
+# Asks the in-flight compiler (if any) to stop. Kills the whole process tree
+# because g++ spawns children (cc1plus, collect2, ld) that would otherwise be
+# orphaned and keep burning resources after the parent dies.
+func cancel_compile() -> void:
+	_cancel_requested = true
+	if _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
+		_kill_process_tree(_compiler_pid)
+
+
+func _cancelled_result() -> Dictionary:
+	return {"ok": false, "output": "Compilation cancelled.", "reason": "cancelled", "exe_path": ""}
+
+
+# Runs the compiler without blocking forever: polls the child PID so cancel()
+# can kill it, drains both output pipes so a chatty compiler can't deadlock on
+# a full pipe buffer, and returns the exit code (-1 on spawn failure/cancel).
+func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
+	if _cancel_requested:
+		return -1
+	var pipes := OS.execute_with_pipe(compiler, PackedStringArray(args), false)
+	if pipes.is_empty() or not pipes.has("pid"):
+		return -1
+	_compiler_pid = int(pipes["pid"])
+	var stdio: FileAccess = pipes.get("stdio")
+	var stderr: FileAccess = pipes.get("stderr")
+
+	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
+		if _cancel_requested:
+			_kill_process_tree(_compiler_pid)
+			break
+		_drain_pipe(stdio, output)
+		_drain_pipe(stderr, output)
+		OS.delay_msec(50)
+
+	_drain_pipe(stdio, output)
+	_drain_pipe(stderr, output)
+
+	# Give a killed tree a moment to actually die, then reap the exit code.
+	var waited := 0
+	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid) and waited < 2000:
+		OS.delay_msec(50)
+		waited += 50
+
+	var exit_code := -1
+	if _compiler_pid > 0 and not _cancel_requested:
+		exit_code = OS.get_process_exit_code(_compiler_pid)
+	_compiler_pid = -1
+	return exit_code
+
+
+func _drain_pipe(file: FileAccess, output: Array) -> void:
+	if file == null:
+		return
+	while not file.eof_reached():
+		var line := file.get_line()
+		if line == "":
+			break
+		output.append(line)
+
+
+func _kill_process_tree(pid: int) -> void:
+	if pid <= 0:
+		return
+	if OS.get_name() == "Windows":
+		OS.execute("taskkill", ["/F", "/T", "/PID", str(pid)], [], true)
+		return
+	for child in _child_pids(pid):
+		_kill_process_tree(child)
+	if OS.is_process_running(pid):
+		OS.kill(pid)
+
+
+func _child_pids(pid: int) -> Array[int]:
+	var children: Array[int] = []
+	var out: Array = []
+	OS.execute("pgrep", ["-P", str(pid)], out, true)
+	for entry in out:
+		var text := str(entry).strip_edges()
+		if text.is_valid_int():
+			children.append(int(text))
+	return children
+
+
 func compile_program() -> Dictionary:
 	var output: Array = []
 	if not _prepare_error.is_empty():
@@ -127,7 +212,10 @@ func compile_program() -> Dictionary:
 	if not runtime_reused:
 		var runtime_args := args.duplicate()
 		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_object])
-		if OS.execute(compiler, runtime_args, output, true) != 0:
+		var runtime_code := _run_cancellable(compiler, runtime_args, output)
+		if _cancel_requested:
+			return _cancelled_result()
+		if runtime_code != 0:
 			return {"ok": false, "output": "\n".join(output), "reason": "runtime_error", "exe_path": ""}
 		var runtime_object_hash := FileAccess.get_sha256(runtime_object)
 		if runtime_object_hash.is_empty():
@@ -154,7 +242,9 @@ func compile_program() -> Dictionary:
 	# Discard runtime compile output so its warnings aren't misattributed to student code.
 	output.clear()
 
-	var exit_code := OS.execute(compiler, args, output, true)
+	var exit_code := _run_cancellable(compiler, args, output)
+	if _cancel_requested:
+		return _cancelled_result()
 	var diagnostics := "\n".join(output)
 	if exit_code == 0:
 		cache.set_value("build", "key", build_key)

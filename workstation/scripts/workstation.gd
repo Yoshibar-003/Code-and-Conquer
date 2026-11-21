@@ -150,7 +150,9 @@ var checked_code := ""
 var has_checked_code := false
 var checked_cpp_executable := ""
 var checked_cpp_line_offset := 0
-var _compile_thread: Thread
+var _compile_task_id := -1
+var _compile_worker := preload("res://execution/cpp/cpp_compile_worker.gd").new()
+var _auto_accept_quit_before := true
 
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
 const ALLOWED_IPC_QUERIES := [
@@ -185,6 +187,7 @@ var custom_levels_list: VBoxContainer
 func _ready() -> void:
 	# Kill any subprocess left over from a previous session that was force-closed.
 	# auto_accept_quit disabled so _notification can clean up before Godot exits.
+	_auto_accept_quit_before = get_tree().auto_accept_quit
 	get_tree().set_auto_accept_quit(false)		# required for _notification to intercept window close
 	if OS.get_name() == "Windows":
 		OS.execute("taskkill", ["/F", "/IM", "student_program.exe"], [], true)
@@ -330,17 +333,6 @@ func _setup_level_windows() -> void:
 	custom_levels_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(custom_levels_list)
 
-func _compile_cpp_in_background(source: String, build_dir: String) -> Dictionary:
-	var background_compiler = preload(Paths.CPP_DRIVER).new()
-	if not background_compiler.prepare_build_files(source, build_dir):
-		return {
-			"ok": false,
-			"output": background_compiler.get_prepare_error(),
-			"reason": background_compiler.get_prepare_reason(),
-			"exe_path": ""
-		}
-	return background_compiler.compile_program()
-
 
 func _prune_stale_cpp_build_dirs(root: String, keep_hash: String) -> void:
 	var dir := DirAccess.open(root)
@@ -386,17 +378,26 @@ func _remove_dir_recursive(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 func _finish_cpp_check(source: String, line_offset: int) -> void:
-	while _compile_thread.is_alive():
+	while _compile_task_id >= 0 \
+			and not WorkerThreadPool.is_task_completed(_compile_task_id) \
+			and is_inside_tree():
 		await get_tree().process_frame
 
-	var build: Dictionary = _compile_thread.wait_to_finish()
-	_compile_thread = null
+	# The workstation is being torn down (menu/quit). The pool task is
+	# detached from this node and its result is simply discarded.
+	if _compile_task_id < 0 or not is_inside_tree():
+		return
+
+	WorkerThreadPool.wait_for_task_completion(_compile_task_id)
+	var build: Dictionary = _compile_worker.result
+	_compile_worker.result = {}
+	_compile_task_id = -1
 	_refresh_program_controls()
 
 	editor.editable = not _controls_locked
 	language_selector.disabled = _controls_locked
 
-	if not build.ok:
+	if not build.get("ok", false):
 		var raw_output := str(build.get("output", ""))
 		match str(build.get("reason", "")):
 			"no_compiler":
@@ -1106,8 +1107,8 @@ func _refresh_program_controls() -> void:
 	var finished := _is_program_finished()
 	var busy := _is_execution_busy(false)
 
-	check_button.disabled = _controls_locked or finished or busy or _compile_thread != null
-	level_button.disabled = _controls_locked or finished or busy or _compile_thread != null
+	check_button.disabled = _controls_locked or finished or busy or _compile_task_id >= 0
+	level_button.disabled = _controls_locked or finished or busy or _compile_task_id >= 0
 
 	if finished:
 		run_button.disabled = true
@@ -1914,9 +1915,20 @@ func _on_done_retry() -> void:
 	_on_reset_button_pressed()
 
 
+func _exit_tree() -> void:
+	_compile_worker.cancel()
+	_stop_execution()
+	# Restore the SceneTree-wide quit flag this scene disabled in _ready so the
+	# main menu's window-close button works again.
+	var tree := get_tree()
+	if tree != null:
+		tree.set_auto_accept_quit(_auto_accept_quit_before)
+
+
 # Intercepts window close so the subprocess is killed before Godot exits
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		CppCompileWorker.cancel_all()
 		_stop_execution()
 		get_tree().quit()
 
@@ -2495,7 +2507,7 @@ func _on_check_button_pressed() -> void:
 		return
 
 	# Probe the compiler on the main thread so the background compile only reads the cached result.
-	if _compile_thread != null:
+	if _compile_task_id >= 0:
 		return
 
 	if compiler.is_platform_supported() and not compiler.detect_compiler():
@@ -2515,21 +2527,17 @@ func _on_check_button_pressed() -> void:
 	language_selector.disabled = true
 	_set_status("Compiling C++...", "")
 
-	_compile_thread = Thread.new()
-
-	var thread_error := _compile_thread.start(
-		_compile_cpp_in_background.bind(
-			generated.generated_source,
-			check_build_dir
-		)
+	_compile_task_id = WorkerThreadPool.add_task(
+		_compile_worker.run.bind(generated.generated_source, check_build_dir),
+		false,
+		"C++ compile check"
 	)
 
-	if thread_error != OK:
-		_compile_thread = null
+	if _compile_task_id < 0:
 		check_button.disabled = false
 		editor.editable = true
 		language_selector.disabled = false
-		log_error("Could not start the C++ compiler thread.")
+		log_error("Could not start the C++ compiler task.")
 		_set_status("Compile failed", "error")
 		return
 

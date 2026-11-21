@@ -1,0 +1,106 @@
+class_name CppCompileWorker
+extends RefCounted
+
+const Paths = preload("res://execution/shared/paths.gd")
+
+# Active compile workers. Guarded by _mutex because run() executes on a
+# WorkerThreadPool thread while cancel_all() runs on the main thread.
+static var _active: Array = []
+static var _mutex := Mutex.new()
+
+# WorkerThreadPool task callables cannot return values through
+# wait_for_task_completion, so the result is published on `result` for the
+# main thread to read once the task completes. Kept on a RefCounted (not the
+# workstation) so the compile can safely outlive the workstation node; the
+# result is then simply discarded.
+var result: Dictionary = {}
+var _build_dir := ""
+var _driver = null
+var _cancel_requested := false
+var _finished := false
+
+
+func run(source: String, build_dir: String) -> void:
+	_build_dir = build_dir
+	_register()
+	if _cancel_requested:
+		_set_cancelled()
+	else:
+		var duplicate := _find_duplicate()
+		if duplicate != null:
+			_reuse_duplicate(duplicate)
+		else:
+			var background_compiler = preload(Paths.CPP_DRIVER).new()
+			_driver = background_compiler
+			if not background_compiler.prepare_build_files(source, build_dir):
+				_set_error(background_compiler.get_prepare_error(), background_compiler.get_prepare_reason())
+			else:
+				result = background_compiler.compile_program()
+	_finished = true
+	_driver = null
+	_unregister()
+
+
+# Asks this worker's compile to stop. Safe to call from any thread and before
+# run() has started (the task then exits immediately).
+func cancel() -> void:
+	_cancel_requested = true
+	if _driver != null and _driver.has_method("cancel_compile"):
+		_driver.cancel_compile()
+
+
+# Cancels every in-flight compile, including ones abandoned by dead
+# workstations. Call before quitting so shutdown doesn't wait on cc1plus.
+static func cancel_all() -> void:
+	_mutex.lock()
+	var workers := _active.duplicate()
+	_mutex.unlock()
+	for worker in workers:
+		if is_instance_valid(worker):
+			worker.cancel()
+
+
+func _register() -> void:
+	_mutex.lock()
+	if not _active.has(self):
+		_active.append(self)
+	_mutex.unlock()
+
+
+func _unregister() -> void:
+	_mutex.lock()
+	_active.erase(self)
+	_mutex.unlock()
+
+
+# Another worker compiling into the same build dir would race on the same
+# source/object/exe files, so identical compiles share one result.
+func _find_duplicate() -> CppCompileWorker:
+	_mutex.lock()
+	var duplicate: CppCompileWorker = null
+	for worker in _active:
+		if worker != self and is_instance_valid(worker) \
+				and worker._build_dir == _build_dir and not worker._finished:
+			duplicate = worker
+			break
+	_mutex.unlock()
+	return duplicate
+
+
+func _reuse_duplicate(duplicate: CppCompileWorker) -> void:
+	while not duplicate._finished and not _cancel_requested:
+		OS.delay_msec(100)
+	if _cancel_requested:
+		_set_cancelled()
+	elif duplicate._finished:
+		result = duplicate.result.duplicate()
+	else:
+		_set_error("The matching compile did not finish.", "internal_error")
+
+
+func _set_error(output: String, reason: String) -> void:
+	result = {"ok": false, "output": output, "reason": reason, "exe_path": ""}
+
+
+func _set_cancelled() -> void:
+	_set_error("Compilation cancelled.", "cancelled")
