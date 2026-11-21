@@ -125,10 +125,11 @@ signal _resume
 
 var current_line_offset: int = 0
 var _is_handling_lose: bool = false
+var _controls_locked: bool = false
 
 var global_level_name := ""
 var exec_speed: float = 0.5
-var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move_limit" | "cmd_limit" | "time_limit" | "done"
+var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move_limit" | "cmd_limit" | "time_limit" | "done" | "error"
 var _run_had_error: bool = false  # set when the subprocess emits [ERROR]
 # === execution limits ===
 # Default limits
@@ -390,10 +391,10 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 
 	var build: Dictionary = _compile_thread.wait_to_finish()
 	_compile_thread = null
+	_refresh_program_controls()
 
-	check_button.disabled = false
-	editor.editable = true
-	language_selector.disabled = false
+	editor.editable = not _controls_locked
+	language_selector.disabled = _controls_locked
 
 	if not build.ok:
 		var raw_output := str(build.get("output", ""))
@@ -583,8 +584,10 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	game_instance = new_game_instance
 	game_subviewport.add_child(game_instance)
 
+	_is_handling_lose = false
 	_run_outcome = "incomplete"
 	_run_had_error = false
+	_refresh_program_controls()
 
 	if preserve_camera and not saved_camera_state.is_empty() \
 			and game_instance.has_method("set_pending_camera_restore"):
@@ -838,6 +841,10 @@ func _on_run_button_pressed() -> void:
 			_set_status("Paused", "")
 		return
 
+	if _is_program_finished():
+		_set_status("Reset the level before running.", "error")
+		return
+
 	if not has_checked_code:
 		_set_status("Check your code before running.", "error")
 		return
@@ -898,6 +905,10 @@ func _on_step_button_pressed() -> void:
 		return
 
 	# start a fresh run, but begin paused so the first command is a single step
+	if _is_program_finished():
+		_set_status("Reset the level before running.", "error")
+		return
+
 	if not has_checked_code:
 		_set_status("Check your code before running.", "error")
 		return
@@ -1010,6 +1021,7 @@ func _on_reset_button_pressed() -> void:
 		step_button.disabled = false
 		reset_button.disabled = false
 		prev_button.disabled = true
+		_refresh_program_controls()
 
 		_set_status("Reset failed. Level could not be reloaded.", "error")
 		log_error("Reset failed: could not reload the level.")
@@ -1022,7 +1034,7 @@ func _on_reset_button_pressed() -> void:
 	_in_replay = false
 
 	run_button.text = "▶ Run"
-	run_button.disabled = false
+	run_button.disabled = not has_checked_code
 	step_button.disabled = false
 	reset_button.disabled = false
 	rotate_left_btn.disabled = false
@@ -1073,7 +1085,25 @@ const LOSE_MESSAGES := [
 #	"Splat. Your player is now wall decor.",     # walking into a wall
 ]
 
+func _is_program_finished() -> bool:
+	return _is_handling_lose or _run_outcome != "incomplete" or _run_had_error
+
+
+func _refresh_program_controls() -> void:
+	var finished := _is_program_finished()
+	var busy := _is_execution_busy(false)
+
+	check_button.disabled = _controls_locked or finished or busy or _compile_thread != null
+	level_button.disabled = _controls_locked or finished or busy or _compile_thread != null
+
+	if finished:
+		run_button.disabled = true
+		step_button.disabled = true
+		prev_button.disabled = true
+
+
 func _set_controls_disabled(disabled: bool) -> void:
+	_controls_locked = disabled
 	run_button.disabled = disabled
 	prev_button.disabled = disabled
 	step_button.disabled = disabled
@@ -1084,8 +1114,8 @@ func _set_controls_disabled(disabled: bool) -> void:
 	rotate_right_btn.disabled = disabled
 	settings_button.disabled = disabled
 	library_button.disabled = disabled
-	level_button.disabled = _is_execution_busy()
-	
+	_refresh_program_controls()
+
 	if disabled:
 		settings_overlay.hide()
 		library_overlay.hide()
@@ -1442,8 +1472,10 @@ func _run_pipeline() -> void:
 	_step_index = 0
 	_in_replay = false
 	_refresh_level_limits()
+	_is_handling_lose = false
 	_run_outcome = "incomplete"
 	_run_had_error = false
+	_refresh_program_controls()
 	await get_tree().process_frame
 	if _run_id != run_id:
 		return
@@ -1646,6 +1678,7 @@ func _run_pipeline() -> void:
 			return
 		log_error("Subprocess did not connect within 5 seconds.")
 		_set_status("Timeout", "error")
+		_run_outcome = "error"
 		_stop_execution()
 		_re_enable_buttons()
 		return
@@ -1778,6 +1811,7 @@ func _run_ipc_loop(run_id: int) -> void:
 				_set_status("Error", "error")
 			else:
 				_set_status("Done", "ok")
+			_refresh_program_controls()
 
 
 func _on_execution_done() -> void:
@@ -1846,6 +1880,7 @@ func _execute_cmd(cmd: String, src_line: int) -> void:
 				# later commands execute before movement or loss handling ends.
 				log_error("Movement did not complete; stopping execution.")
 				_set_status("Execution stopped", "error")
+				_run_outcome = "error"
 				_stop_execution()
 				_re_enable_buttons()
 				return
@@ -1968,6 +2003,7 @@ func _re_enable_buttons() -> void:
 	reset_button.disabled = false
 	rotate_left_btn.visible = not _is_2d_mode
 	rotate_right_btn.visible = not _is_2d_mode
+	_refresh_program_controls()
 
 
 func _on_grid_2d_button_pressed() -> void:
@@ -2341,8 +2377,12 @@ func _on_editor_text_changed() -> void:
 	checked_cpp_executable = ""
 
 func _on_check_button_pressed() -> void:
-	if _ipc_active:
+	if _is_execution_busy():
 		_set_status("Stop the current program before checking code.", "error")
+		return
+
+	if _is_program_finished():
+		_set_status("Reset the level before checking code.", "error")
 		return
 
 	var source := editor.text
@@ -2419,6 +2459,7 @@ func _on_check_button_pressed() -> void:
 		_set_status("Compile failed", "error")
 		return
 
+	_refresh_program_controls()
 	await _finish_cpp_check(source, generated.line_offset)
 
 
@@ -2504,6 +2545,10 @@ func _on_campaign_level_selected(path: String) -> void:
 	_switch_level()
 
 func _on_level_button_pressed() -> void:
+	if _is_program_finished():
+		_set_status("Reset the level before switching levels.", "error")
+		return
+
 	if _is_execution_busy():
 		_set_status("Stop the current program before switching levels.", "error")
 		return
@@ -2594,7 +2639,7 @@ func _switch_level() -> void:
 	editor.grab_focus()
 
 
-func _is_execution_busy() -> bool:
+func _is_execution_busy(verbose: bool = true) -> bool:
 	var busy: bool = (
 		_run_pending
 		or _ipc_active
@@ -2602,12 +2647,13 @@ func _is_execution_busy() -> bool:
 		or _subprocess_pid != -1
 	)
 
-	print(
-		"Execution busy: ", busy,
-		" | Pending: ", _run_pending,
-		" | IPC: ", _ipc_active,
-		" | PID: ", _subprocess_pid
-	)
+	if verbose:
+		print(
+			"Execution busy: ", busy,
+			" | Pending: ", _run_pending,
+			" | IPC: ", _ipc_active,
+			" | PID: ", _subprocess_pid
+		)
 
 	return busy
 

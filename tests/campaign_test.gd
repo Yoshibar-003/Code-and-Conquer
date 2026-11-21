@@ -195,6 +195,18 @@ func run_tests() -> void:
 	workstation._on_language_changed(1)
 	await process_frame
 	check(workstation.editor.text.begins_with("from robot"), "Python selection must load Python scaffold")
+
+	# A finished run must lock code/level actions until the level is reset.
+	workstation._run_had_error = true
+	workstation._refresh_program_controls()
+	check(workstation.check_button.disabled, "Finished programs must disable Check Code")
+	check(workstation.level_button.disabled, "Finished programs must disable Change Level")
+	check(workstation.run_button.disabled, "Finished programs must disable Run")
+	workstation._run_had_error = false
+	workstation._set_controls_disabled(false)
+	check(not workstation.check_button.disabled, "Resettable programs must enable Check Code")
+	check(not workstation.level_button.disabled, "Resettable programs must enable Change Level")
+
 	for i in range(Campaign.LEVELS.size()):
 		# Level loads must reset run state themselves; the test moves the
 		# player directly, so it relies on production doing this reset.
@@ -213,6 +225,8 @@ func run_tests() -> void:
 					workstation.player_node.turn_left()
 		workstation.game_instance.check_win_condition(workstation.player_node.grid_x, workstation.player_node.grid_y)
 		check(workstation.win_overlay.visible, "Campaign victory must show overlay")
+		check(workstation.check_button.disabled, "Victory must disable Check Code")
+		check(workstation.level_button.disabled, "Victory must disable Change Level")
 		check(Campaign.LEVELS[i].id in Campaign.completed_ids(save_path), "Workstation victory must save completion")
 		# Headless audio never finishes a playback, so each play() would
 		# orphan the previous one. Stop the win sound between victories.
@@ -223,6 +237,8 @@ func run_tests() -> void:
 			await process_frame
 			check(root.get_node("SelectedLevel").path == Campaign.LEVELS[i + 1].path, "Next Level must select next map")
 			check(workstation.editor.text.begins_with("from robot"), "Next Level must preserve Python selection")
+			check(not workstation.check_button.disabled, "Next Level must re-enable Check Code")
+			check(not workstation.level_button.disabled, "Next Level must re-enable Change Level")
 		else:
 			check(not workstation.campaign_next_button.visible, "Final level must hide Next Level")
 			check(workstation.get_node("WinOverlay/WinCard/WinContent/WinTitle").text == "Campaign Complete!", "Final victory must celebrate campaign completion")
@@ -230,6 +246,8 @@ func run_tests() -> void:
 	workstation._on_win_retry()
 	await process_frame
 	check(not workstation.win_overlay.visible and workstation.editor.editable, "Replay must restore controls")
+	check(not workstation.check_button.disabled, "Replay must re-enable Check Code")
+	check(not workstation.level_button.disabled, "Replay must re-enable Change Level")
 	# Stop win audio before freeing so its playback doesn't leak at exit.
 	for player in workstation.find_children("*", "AudioStreamPlayer", true, false):
 		player.stop()
