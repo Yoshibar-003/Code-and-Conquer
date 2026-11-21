@@ -30,10 +30,16 @@ func run_tests() -> void:
 
 	var waiter = CppCompileWorker.new()
 	waiter._build_dir = dir_a
+	waiter._register()
 	var found := waiter._find_duplicate()
-	check(found == winner, "Should find the unfinished worker with the same build dir")
+	check(found == winner, "Should find the earlier-registered worker with the same build dir")
 	check(waiter._find_duplicate() != other_dir, "Should not match a worker with a different build dir")
 	check(waiter._find_duplicate() != already_done, "Should not match a finished worker")
+
+	# The earlier registrant must not dedupe onto the later one, so two
+	# workers can never wait on each other.
+	check(winner._find_duplicate() == null, "Earlier registrant should not dedupe onto a later worker")
+	waiter._unregister()
 
 	# A completed real result is adopted.
 	winner._finished = true

@@ -904,6 +904,9 @@ func _resume_after_step_back(run_id: int) -> void:
 
 
 func _on_step_button_pressed() -> void:
+	if _compile_task_id >= 0:
+		return
+
 	# Running: pause first
 	if _ipc_active and not _paused:
 		_paused = true
@@ -1124,6 +1127,12 @@ func _refresh_program_controls() -> void:
 
 	check_button.disabled = _controls_locked or finished or busy or _compile_task_id >= 0
 	level_button.disabled = _controls_locked or finished or busy or _compile_task_id >= 0
+
+	# A compile in flight must not allow Step to launch a run of previously
+	# checked code concurrently with it.
+	if _compile_task_id >= 0:
+		step_button.disabled = true
+		prev_button.disabled = true
 
 	if finished:
 		run_button.disabled = true
@@ -1371,7 +1380,7 @@ func _on_win_next() -> void:
 	_switch_level()
 	if _loaded_level_path == next_path:
 		run_button.text = "▶ Run"
-		run_button.disabled = false
+		run_button.disabled = not has_checked_code
 
 	# Restore normal victory text for future levels.
 	$WinOverlay/WinCard/WinContent/WinTitle.text = "Level Complete!"
@@ -2545,6 +2554,9 @@ func _on_check_button_pressed() -> void:
 	language_selector.disabled = true
 	_set_status("Compiling C++...", "")
 
+	# Fresh worker per check so result/_finished/_cancel_requested can't leak
+	# stale state from a previous compile into this one.
+	_compile_worker = preload("res://execution/cpp/cpp_compile_worker.gd").new()
 	_compile_task_id = WorkerThreadPool.add_task(
 		_compile_worker.run.bind(generated.generated_source, check_build_dir),
 		false,
@@ -2750,7 +2762,8 @@ func _is_execution_busy(verbose: bool = true) -> bool:
 			"Execution busy: ", busy,
 			" | Pending: ", _run_pending,
 			" | IPC: ", _ipc_active,
-			" | PID: ", _subprocess_pid
+			" | PID: ", _subprocess_pid,
+			" | Compile: ", _compile_task_id
 		)
 
 	return busy

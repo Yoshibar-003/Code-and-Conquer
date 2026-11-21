@@ -98,7 +98,8 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 		return -1
 	var pipes := OS.execute_with_pipe(compiler, PackedStringArray(args), false)
 	if pipes.is_empty() or not pipes.has("pid"):
-		return -1
+		push_warning("Failed to spawn compiler: " + compiler)
+		return -2  # spawn failure, distinct from a real compile failure
 	_compiler_pid = int(pipes["pid"])
 	var stdio: FileAccess = pipes.get("stdio")
 	var stderr: FileAccess = pipes.get("stderr")
@@ -123,6 +124,10 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 	# diagnostics after a blank line aren't dropped (pipe eof is unreliable).
 	_drain_pipe(stdio, output, true)
 	_drain_pipe(stderr, output, true)
+	if stdio != null:
+		stdio.close()
+	if stderr != null:
+		stderr.close()
 
 	var exit_code := -1
 	if _compiler_pid > 0:
@@ -239,6 +244,8 @@ func compile_program() -> Dictionary:
 		var runtime_code := _run_cancellable(compiler, runtime_args, output)
 		if _cancel_requested:
 			return _cancelled_result()
+		if runtime_code == -2:
+			return {"ok": false, "output": "Failed to launch the C++ compiler.", "reason": "internal_error", "exe_path": ""}
 		if runtime_code != 0:
 			return {"ok": false, "output": "\n".join(output), "reason": "runtime_error", "exe_path": ""}
 		var runtime_object_hash := FileAccess.get_sha256(runtime_object)
@@ -276,8 +283,8 @@ func compile_program() -> Dictionary:
 	cache.save(cache_path)
 	return {
 		"ok": exit_code == 0,
-		"output": diagnostics,
-		"reason": "" if exit_code == 0 else "compile_error",
+		"output": diagnostics if exit_code != -2 else "Failed to launch the C++ compiler.",
+		"reason": "" if exit_code == 0 else ("internal_error" if exit_code == -2 else "compile_error"),
 		"cached": false,
 		"exe_path": exe if exit_code == 0 else ""
 	}

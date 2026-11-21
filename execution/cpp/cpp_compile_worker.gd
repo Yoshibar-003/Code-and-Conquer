@@ -7,6 +7,7 @@ const Paths = preload("res://execution/shared/paths.gd")
 # WorkerThreadPool thread while cancel_all() runs on the main thread.
 static var _active: Array = []
 static var _mutex := Mutex.new()
+static var _next_seq := 0
 # Latched by cancel_all() so tasks still sitting in the WorkerThreadPool
 # queue (not yet inside run(), hence not in _active) also abort on start.
 # Never cleared: only call cancel_all() on quit paths, or every later
@@ -23,6 +24,7 @@ var _build_dir := ""
 var _driver = null
 var _cancel_requested := false
 var _finished := false
+var _seq := -1
 
 
 # Thin shell: _compile_inner does all the risky work, so _finished and
@@ -75,6 +77,8 @@ static func cancel_all() -> void:
 func _register() -> void:
 	_mutex.lock()
 	if not _active.has(self):
+		_seq = _next_seq
+		_next_seq += 1
 		_active.append(self)
 	_mutex.unlock()
 
@@ -91,8 +95,11 @@ func _find_duplicate() -> CppCompileWorker:
 	_mutex.lock()
 	var duplicate: CppCompileWorker = null
 	for worker in _active:
+		# Only dedupe onto an earlier registrant so two workers can't pick
+		# each other and wait forever.
 		if worker != self and is_instance_valid(worker) \
-				and worker._build_dir == _build_dir and not worker._finished:
+				and worker._build_dir == _build_dir and not worker._finished \
+				and worker._seq >= 0 and worker._seq < _seq:
 			duplicate = worker
 			break
 	_mutex.unlock()
@@ -108,9 +115,9 @@ func _reuse_duplicate(duplicate: CppCompileWorker) -> bool:
 	if _cancel_requested or _cancel_all_requested:
 		_set_cancelled()
 		return true
-	if not duplicate._finished:
-		_set_error("The matching compile did not finish.", "internal_error")
-		return true
+	# The wait loop only exits on _finished or a cancel flag, so the duplicate
+	# is guaranteed finished here. Reject transient/empty results so the
+	# caller compiles fresh instead of reporting a spurious failure.
 	if duplicate.result.is_empty() \
 			or str(duplicate.result.get("reason", "")) == "cancelled":
 		return false
