@@ -742,6 +742,8 @@ func _on_language_changed(index: int) -> void:
 	
 	_load_level_scene(false, true)
 	_restore_level_code(_loaded_level_path)
+	run_button.disabled = not has_checked_code
+	step_button.disabled = not has_checked_code
 
 
 # === syntax highlighting ===
@@ -1018,7 +1020,7 @@ func _on_reset_button_pressed() -> void:
 
 		run_button.text = "▶ Run"
 		run_button.disabled = not has_checked_code
-		step_button.disabled = false
+		step_button.disabled = not has_checked_code
 		reset_button.disabled = false
 		prev_button.disabled = true
 		_refresh_program_controls()
@@ -1035,7 +1037,7 @@ func _on_reset_button_pressed() -> void:
 
 	run_button.text = "▶ Run"
 	run_button.disabled = not has_checked_code
-	step_button.disabled = false
+	step_button.disabled = not has_checked_code
 	reset_button.disabled = false
 	rotate_left_btn.disabled = false
 	rotate_right_btn.disabled = false
@@ -1086,6 +1088,8 @@ const LOSE_MESSAGES := [
 ]
 
 func _is_program_finished() -> bool:
+	if _is_execution_busy(false):
+		return false
 	return _is_handling_lose or _run_outcome != "incomplete" or _run_had_error
 
 
@@ -1102,23 +1106,57 @@ func _refresh_program_controls() -> void:
 		prev_button.disabled = true
 
 
-func _set_controls_disabled(disabled: bool) -> void:
-	_controls_locked = disabled
-	run_button.disabled = disabled
-	prev_button.disabled = disabled
-	step_button.disabled = disabled
-	reset_button.disabled = disabled
-	language_selector.disabled = disabled
-	editor.editable = not disabled
-	rotate_left_btn.disabled = disabled
-	rotate_right_btn.disabled = disabled
-	settings_button.disabled = disabled
-	library_button.disabled = disabled
+func _restore_workspace_controls() -> void:
+	var busy := _is_execution_busy(false)
+	var ipc_running := _ipc_active
+
+	language_selector.disabled = false
+	editor.editable = true
+	settings_button.disabled = false
+	library_button.disabled = false
+	reset_button.disabled = false
+	rotate_left_btn.disabled = false
+	rotate_right_btn.disabled = false
+	rotate_left_btn.visible = not _is_2d_mode
+	rotate_right_btn.visible = not _is_2d_mode
+
+	if busy and ipc_running:
+		run_button.disabled = false
+		run_button.text = "▶ Resume" if _paused else "❚❚ Pause"
+		step_button.disabled = not _paused
+		prev_button.disabled = not (_paused and _step_index > 0)
+	elif busy or _is_program_finished():
+		run_button.text = "▶ Run"
+		run_button.disabled = true
+		step_button.disabled = true
+		prev_button.disabled = true
+	else:
+		run_button.text = "▶ Run"
+		run_button.disabled = not has_checked_code
+		step_button.disabled = not has_checked_code
+		prev_button.disabled = true
+
 	_refresh_program_controls()
 
+
+func _set_controls_disabled(disabled: bool) -> void:
+	_controls_locked = disabled
 	if disabled:
+		run_button.disabled = true
+		prev_button.disabled = true
+		step_button.disabled = true
+		reset_button.disabled = true
+		language_selector.disabled = true
+		editor.editable = false
+		rotate_left_btn.disabled = true
+		rotate_right_btn.disabled = true
+		settings_button.disabled = true
+		library_button.disabled = true
+		_refresh_program_controls()
 		settings_overlay.hide()
 		library_overlay.hide()
+	else:
+		_restore_workspace_controls()
 
 
 # TODO: Pick a message for the *specific* lose condition
@@ -2622,16 +2660,13 @@ func _switch_level() -> void:
 	done_overlay.hide()
 	campaign_next_button.hide()
 
-	# Restore workstation controls.
-	_set_controls_disabled(false)
-	run_button.text = "▶ Run"
-	run_button.disabled = true
-	prev_button.disabled = true
-
 	# Previously checked code must not carry into a new level.
 	has_checked_code = false
 	checked_code = ""
 	checked_cpp_executable = ""
+
+	# Restore workstation controls.
+	_set_controls_disabled(false)
 
 	_set_status("Ready", "")
 	editor.grab_focus()

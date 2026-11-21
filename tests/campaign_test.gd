@@ -207,6 +207,31 @@ func run_tests() -> void:
 	check(not workstation.check_button.disabled, "Resettable programs must enable Check Code")
 	check(not workstation.level_button.disabled, "Resettable programs must enable Change Level")
 
+	# Stay on Leave Level during a run must restore run-state controls.
+	workstation._run_pending = true
+	workstation._ipc_active = true
+	workstation._set_controls_disabled(true)
+	workstation._set_controls_disabled(false)
+	check(not workstation.run_button.disabled, "Stay during run must keep Pause available")
+	check(workstation.run_button.text == "❚❚ Pause", "Stay during run must restore Pause label")
+	check(workstation.step_button.disabled, "Stay during run must not enable Step")
+	check(workstation.prev_button.disabled, "Stay during run must not enable Prev")
+	check(workstation.check_button.disabled, "Stay during run must keep Check Code disabled")
+	check(workstation.level_button.disabled, "Stay during run must keep Change Level disabled")
+
+	workstation._paused = true
+	workstation._step_index = 1
+	workstation._set_controls_disabled(true)
+	workstation._set_controls_disabled(false)
+	check(not workstation.step_button.disabled, "Stay while paused must re-enable Step")
+	check(not workstation.prev_button.disabled, "Stay while paused must re-enable Prev")
+
+	workstation._ipc_active = false
+	workstation._run_pending = false
+	workstation._paused = false
+	workstation._step_index = 0
+	workstation._set_controls_disabled(false)
+
 	for i in range(Campaign.LEVELS.size()):
 		# Level loads must reset run state themselves; the test moves the
 		# player directly, so it relies on production doing this reset.
