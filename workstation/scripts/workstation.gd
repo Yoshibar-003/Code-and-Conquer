@@ -412,6 +412,8 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 			"runtime_error":
 				log_error(raw_output)
 				_set_status("C++ runtime build failed", "error")
+			"cancelled":
+				_set_status("Compile cancelled.", "")
 			_:
 				log_error(compiler.remap_diagnostics(raw_output, line_offset))
 				_set_status("Compile failed", "error")
@@ -1037,6 +1039,7 @@ func _on_reset_button_pressed() -> void:
 		return
 
 	# Reset succeeded. Clear execution history.
+	_set_controls_disabled(false)
 	_clear_editor_highlights()
 	_cmd_history.clear()
 	_step_index = 0
@@ -1926,6 +1929,7 @@ func _on_done_retry() -> void:
 
 func _exit_tree() -> void:
 	_compile_worker.cancel()
+	_compile_task_id = -1
 	_stop_execution()
 	# Restore the SceneTree-wide quit flag this scene disabled in _ready so the
 	# main menu's window-close button works again.

@@ -7,6 +7,9 @@ const Paths = preload("res://execution/shared/paths.gd")
 # WorkerThreadPool thread while cancel_all() runs on the main thread.
 static var _active: Array = []
 static var _mutex := Mutex.new()
+# Latched by cancel_all() so tasks still sitting in the WorkerThreadPool
+# queue (not yet inside run(), hence not in _active) also abort on start.
+static var _cancel_all_requested := false
 
 # WorkerThreadPool task callables cannot return values through
 # wait_for_task_completion, so the result is published on `result` for the
@@ -33,12 +36,11 @@ func run(source: String, build_dir: String) -> void:
 
 
 func _compile_inner(source: String, build_dir: String) -> void:
-	if _cancel_requested:
+	if _cancel_requested or _cancel_all_requested:
 		_set_cancelled()
 		return
 	var duplicate := _find_duplicate()
-	if duplicate != null:
-		_reuse_duplicate(duplicate)
+	if duplicate != null and _reuse_duplicate(duplicate):
 		return
 	var background_compiler = preload(Paths.CPP_DRIVER).new()
 	_driver = background_compiler
@@ -59,6 +61,7 @@ func cancel() -> void:
 # Cancels every in-flight compile, including ones abandoned by dead
 # workstations. Call before quitting so shutdown doesn't wait on cc1plus.
 static func cancel_all() -> void:
+	_cancel_all_requested = true
 	_mutex.lock()
 	var workers := _active.duplicate()
 	_mutex.unlock()
@@ -94,15 +97,23 @@ func _find_duplicate() -> CppCompileWorker:
 	return duplicate
 
 
-func _reuse_duplicate(duplicate: CppCompileWorker) -> void:
-	while not duplicate._finished and not _cancel_requested:
+# Returns false when the duplicate's result shouldn't be adopted (a cancelled
+# compile is transient, not a property of the source), so the caller compiles
+# fresh instead of reporting a spurious failure.
+func _reuse_duplicate(duplicate: CppCompileWorker) -> bool:
+	while not duplicate._finished and not _cancel_requested and not _cancel_all_requested:
 		OS.delay_msec(100)
-	if _cancel_requested:
+	if _cancel_requested or _cancel_all_requested:
 		_set_cancelled()
-	elif duplicate._finished:
-		result = duplicate.result.duplicate()
-	else:
+		return true
+	if not duplicate._finished:
 		_set_error("The matching compile did not finish.", "internal_error")
+		return true
+	if duplicate.result.is_empty() \
+			or str(duplicate.result.get("reason", "")) == "cancelled":
+		return false
+	result = duplicate.result.duplicate()
+	return true
 
 
 func _set_error(output: String, reason: String) -> void:
