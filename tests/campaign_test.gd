@@ -232,6 +232,26 @@ func run_tests() -> void:
 	workstation._step_index = 0
 	workstation._set_controls_disabled(false)
 
+	# A terminal outcome must evict transient popups and block stray signals.
+	workstation.menu_confirm_overlay.visible = true
+	workstation.settings_overlay.visible = true
+	workstation._on_level_complete()
+	check(workstation.win_overlay.visible, "Win must show after level complete")
+	check(not workstation.menu_confirm_overlay.visible, "Win must hide Leave Level popup")
+	check(not workstation.settings_overlay.visible, "Win must hide Settings")
+	workstation._on_player_lose("stray lose")
+	workstation._trigger_incomplete_lose("stray incomplete")
+	workstation._trigger_time_limit_lose()
+	workstation._on_execution_done()
+	check(workstation.win_overlay.visible, "Stray lose/done signals must not replace win")
+	check(not workstation.lose_overlay.visible, "Stray lose must not show lose popup")
+	check(not workstation.done_overlay.visible, "Stray done must not show done popup")
+	check(workstation._run_outcome == "win", "Stray signals must not change terminal outcome")
+	workstation.get_node("WinSound").stop()
+	workstation._on_win_retry()
+	await process_frame
+	check(workstation._run_outcome == "incomplete", "Retry must clear terminal outcome")
+
 	for i in range(Campaign.LEVELS.size()):
 		# Level loads must reset run state themselves; the test moves the
 		# player directly, so it relies on production doing this reset.

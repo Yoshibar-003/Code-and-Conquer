@@ -1090,7 +1090,16 @@ const LOSE_MESSAGES := [
 func _is_program_finished() -> bool:
 	if _is_execution_busy(false):
 		return false
-	return _is_handling_lose or _run_outcome != "incomplete" or _run_had_error
+	return _has_terminal_outcome()
+
+
+# True once any win/lose/done/error outcome has been reached, regardless of
+# whether execution is still busy. Used to make terminal handlers idempotent
+# so a stray late signal cannot show a second result popup.
+func _has_terminal_outcome() -> bool:
+	if _is_handling_lose or _run_outcome != "incomplete":
+		return true
+	return _run_had_error and not _is_execution_busy(false)
 
 
 func _refresh_program_controls() -> void:
@@ -1139,6 +1148,33 @@ func _restore_workspace_controls() -> void:
 	_refresh_program_controls()
 
 
+# Hides every transient popup/window so a result popup is the only thing
+# visible. Result overlays (win/lose/done) are handled separately by
+# _show_result_overlay.
+func _hide_transient_popups() -> void:
+	settings_overlay.hide()
+	library_overlay.hide()
+	menu_confirm_overlay.hide()
+	report_folder_dialog.hide()
+	if level_type_window != null:
+		level_type_window.hide()
+	if custom_levels_window != null:
+		custom_levels_window.hide()
+	if campaign_menu != null:
+		campaign_menu.hide()
+
+
+# Shows a result popup and evicts everything else: other result overlays and
+# all transient popups. Result popups take priority over anything previously
+# open (e.g. "Leave Level?" or Settings).
+func _show_result_overlay(overlay: Control) -> void:
+	win_overlay.hide()
+	lose_overlay.hide()
+	done_overlay.hide()
+	_hide_transient_popups()
+	overlay.show()
+
+
 func _set_controls_disabled(disabled: bool) -> void:
 	_controls_locked = disabled
 	if disabled:
@@ -1153,8 +1189,7 @@ func _set_controls_disabled(disabled: bool) -> void:
 		settings_button.disabled = true
 		library_button.disabled = true
 		_refresh_program_controls()
-		settings_overlay.hide()
-		library_overlay.hide()
+		_hide_transient_popups()
 	else:
 		_restore_workspace_controls()
 
@@ -1165,7 +1200,7 @@ func _get_funny_lose_message() -> String:
 
 
 func _trigger_move_limit_lose() -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	
 	_is_handling_lose = true
@@ -1179,12 +1214,12 @@ func _trigger_move_limit_lose() -> void:
 	_set_status("You lost", "error")
 	
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _trigger_cmd_limit_lose() -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	
 	_is_handling_lose = true
@@ -1198,12 +1233,12 @@ func _trigger_cmd_limit_lose() -> void:
 	_set_status("You lost", "error")
 	
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _trigger_time_limit_lose() -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	
 	_is_handling_lose = true
@@ -1216,7 +1251,7 @@ func _trigger_time_limit_lose() -> void:
 	_set_status("You lost", "error")
 	
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
@@ -1224,7 +1259,7 @@ func _trigger_time_limit_lose() -> void:
 #   - Player code finished without winning or crashing
 #   - player landed on the goal tile but objectives weren't satisfied
 func _trigger_incomplete_lose(reason: String) -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	_is_handling_lose = true
 	_run_outcome = "incomplete"
@@ -1237,12 +1272,12 @@ func _trigger_incomplete_lose(reason: String) -> void:
 	_set_status("You lost", "error")
 
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _on_player_lose(reason: String) -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	_is_handling_lose = true
 	_run_outcome = "lose"
@@ -1255,12 +1290,12 @@ func _on_player_lose(reason: String) -> void:
 	_set_status("You lost", "error")
 
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _on_level_complete() -> void:
-	if _is_handling_lose or _run_outcome == "win":
+	if _has_terminal_outcome():
 		return
 	$WinSound.play()
 	_run_outcome = "win"
@@ -1281,7 +1316,7 @@ func _on_level_complete() -> void:
 	log_success("Your robot reached the goal!")
 	_set_status("Level Complete!", "ok")
 
-	win_overlay.visible = true
+	_show_result_overlay(win_overlay)
 	_set_controls_disabled(true)
 
 
@@ -1325,6 +1360,7 @@ func _on_win_next() -> void:
 
 
 func _on_go_to_menu() -> void:
+	_stop_execution()
 	get_tree().change_scene_to_file("res://main_menu/scenes/main_menu.tscn")
 
 
@@ -1851,7 +1887,7 @@ func _run_ipc_loop(run_id: int) -> void:
 
 
 func _on_execution_done() -> void:
-	if _is_handling_lose or _run_outcome == "done":
+	if _has_terminal_outcome():
 		return
 	_run_outcome = "done"
 	_stop_execution()
@@ -1859,7 +1895,7 @@ func _on_execution_done() -> void:
 	run_button.disabled = true
 	step_button.disabled = true
 	_set_status("Done", "ok")
-	done_overlay.visible = true
+	_show_result_overlay(done_overlay)
 	_set_controls_disabled(true)
 
 
@@ -2149,6 +2185,8 @@ func r_rotate_button_up() -> void:
 # toggle library_overlay between visible and invisible when library_button is pressed
 func _on_library_button_pressed() -> void:
 	library_overlay.visible = not library_overlay.visible
+	if library_overlay.visible:
+		settings_overlay.hide()
 
 # switches overlays invisible when clicking outside them
 func _input(event) -> void:
