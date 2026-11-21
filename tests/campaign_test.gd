@@ -246,6 +246,32 @@ func run_tests() -> void:
 	check(workstation.editor.editable, "Compile finish must restore editor")
 	check(not workstation.language_selector.disabled, "Compile finish must restore language selector")
 
+	# Reset during a compile must not re-enable Run/Step behind the busy state.
+	workstation.has_checked_code = true
+	workstation._compile_task_id = 12345
+	workstation._on_reset_button_pressed()
+	check(workstation.run_button.disabled, "Reset during compile must keep Run disabled")
+	check(workstation.step_button.disabled, "Reset during compile must keep Step disabled")
+	workstation.has_checked_code = true
+	workstation._compile_task_id = -1
+	workstation._set_controls_disabled(false)
+	check(not workstation.run_button.disabled, "Compile finish must restore Run")
+	check(not workstation.step_button.disabled, "Compile finish must restore Step")
+
+	# A compile finishing while the UI is locked (e.g. Leave Level? open) must
+	# not re-enable Run/Step behind the dialog.
+	workstation._controls_locked = true
+	workstation._compile_worker = CppCompileWorker.new()
+	workstation._compile_worker.result = {"ok": true, "output": "", "reason": "", "exe_path": "prog.exe", "cached": false}
+	workstation._compile_task_id = WorkerThreadPool.add_task(func(): pass, false, "compile-finish-test")
+	await workstation._finish_cpp_check(workstation.editor.text, 0)
+	check(workstation.run_button.disabled, "Locked compile finish must keep Run disabled")
+	check(workstation.step_button.disabled, "Locked compile finish must keep Step disabled")
+	check(not workstation.editor.editable, "Locked compile finish must keep editor locked")
+	workstation._controls_locked = false
+	workstation._set_controls_disabled(false)
+	check(not workstation.run_button.disabled, "Unlocked compile finish must restore Run")
+
 	# A terminal outcome must evict transient popups and block stray signals.
 	workstation.menu_confirm_overlay.visible = true
 	workstation.settings_overlay.visible = true

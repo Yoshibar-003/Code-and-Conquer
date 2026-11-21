@@ -420,9 +420,10 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 				log_error(compiler.remap_diagnostics(raw_output, line_offset))
 				_set_status("Compile failed", "error")
 		# A failed re-check keeps the previous checked build valid, so restore
-		# Run/Step from has_checked_code instead of leaving them disabled.
-		run_button.disabled = not has_checked_code
-		step_button.disabled = not has_checked_code
+		# Run/Step from has_checked_code — but never behind a locked UI
+		# (e.g. Leave Level? still open) or while another compile is running.
+		run_button.disabled = _controls_locked or not has_checked_code
+		step_button.disabled = _controls_locked or not has_checked_code
 		return
 
 	# The code editor was locked during the compile, but guard anyway:
@@ -435,7 +436,8 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 	has_checked_code = true
 	checked_cpp_executable = str(build.get("exe_path", ""))
 	checked_cpp_line_offset = line_offset
-	run_button.disabled = false
+	run_button.disabled = _controls_locked or not has_checked_code
+	step_button.disabled = _controls_locked or not has_checked_code
 	_set_status("C++ compiled successfully — ready to run.", "")
 	log_line("C++ code unchanged — previous build reused." if build.get("cached", false) else "C++ compilation passed.")
 
@@ -1037,8 +1039,8 @@ func _on_reset_button_pressed() -> void:
 		_set_controls_disabled(false)
 
 		run_button.text = "▶ Run"
-		run_button.disabled = not has_checked_code
-		step_button.disabled = not has_checked_code
+		run_button.disabled = not has_checked_code or _is_execution_busy(false)
+		step_button.disabled = not has_checked_code or _is_execution_busy(false)
 		reset_button.disabled = false
 		prev_button.disabled = true
 		_refresh_program_controls()
@@ -1055,8 +1057,8 @@ func _on_reset_button_pressed() -> void:
 	_in_replay = false
 
 	run_button.text = "▶ Run"
-	run_button.disabled = not has_checked_code
-	step_button.disabled = not has_checked_code
+	run_button.disabled = not has_checked_code or _is_execution_busy(false)
+	step_button.disabled = not has_checked_code or _is_execution_busy(false)
 	reset_button.disabled = false
 	rotate_left_btn.disabled = false
 	rotate_right_btn.disabled = false

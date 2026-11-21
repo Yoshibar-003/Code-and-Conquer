@@ -48,6 +48,10 @@ func _compile_inner(source: String, build_dir: String) -> void:
 		return
 	var background_compiler = preload(Paths.CPP_DRIVER).new()
 	_driver = background_compiler
+	# A cancel may have landed while finding a duplicate but before the driver
+	# existed to receive it; forward it now so the compile aborts immediately.
+	if _cancel_requested or _cancel_all_requested:
+		_driver.cancel_compile()
 	if not background_compiler.prepare_build_files(source, build_dir):
 		_set_error(background_compiler.get_prepare_error(), background_compiler.get_prepare_reason())
 	else:
