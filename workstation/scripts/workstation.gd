@@ -2495,7 +2495,7 @@ func _on_editor_text_changed() -> void:
 func _on_check_button_pressed() -> void:
 	if _compile_task_id >= 0:
 		return
-	if _is_execution_busy():
+	if _is_execution_busy(false):
 		_set_status("Stop the current program before checking code.", "error")
 		return
 

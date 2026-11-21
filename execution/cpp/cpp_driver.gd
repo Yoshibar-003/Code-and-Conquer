@@ -229,6 +229,8 @@ func compile_program() -> Dictionary:
 	var cache := ConfigFile.new()
 	cache.load(cache_path)
 	var exe_hash := FileAccess.get_sha256(exe)
+	if _cancel_requested:
+		return _cancelled_result()
 	if cache.get_value("build", "key", "") == build_key and exe_hash != "" \
 			and cache.get_value("build", "exe_hash", "") == exe_hash:
 		return {"ok": true, "output": "", "exe_path": exe, "cached": true}

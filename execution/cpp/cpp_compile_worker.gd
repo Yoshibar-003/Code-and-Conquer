@@ -78,6 +78,12 @@ static func cancel_all() -> void:
 			worker.cancel()
 
 
+# Clears the quit-only latch. Only needed if a future WM_CLOSE_REQUEST handler
+# aborts the close after cancel_all() already ran.
+static func reset_cancel_all() -> void:
+	_cancel_all_requested = false
+
+
 func _register() -> void:
 	_mutex.lock()
 	if not _active.has(self):
