@@ -232,6 +232,20 @@ func run_tests() -> void:
 	workstation._step_index = 0
 	workstation._set_controls_disabled(false)
 
+	# A compile in flight must keep the code editor and language selector locked
+	# across Leave Level -> Stay, and count as busy for level-switch guards.
+	workstation._compile_task_id = 12345
+	check(workstation._is_execution_busy(), "Compile must count as busy")
+	workstation._set_controls_disabled(true)
+	workstation._set_controls_disabled(false)
+	check(not workstation.editor.editable, "Stay during compile must keep editor locked")
+	check(workstation.language_selector.disabled, "Stay during compile must keep language selector locked")
+	check(workstation.run_button.disabled, "Stay during compile must keep Run disabled")
+	workstation._compile_task_id = -1
+	workstation._set_controls_disabled(false)
+	check(workstation.editor.editable, "Compile finish must restore editor")
+	check(not workstation.language_selector.disabled, "Compile finish must restore language selector")
+
 	# A terminal outcome must evict transient popups and block stray signals.
 	workstation.menu_confirm_overlay.visible = true
 	workstation.settings_overlay.visible = true

@@ -417,6 +417,12 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 				_set_status("Compile failed", "error")
 		return
 
+	# The code editor was locked during the compile, but guard anyway:
+	# if text no longer matches what was compiled, this build is stale.
+	if editor.text != source:
+		_set_status("Code changed during compile — run Check Code again.", "error")
+		return
+
 	checked_code = source
 	has_checked_code = true
 	checked_cpp_executable = str(build.get("exe_path", ""))
@@ -1120,8 +1126,11 @@ func _restore_workspace_controls() -> void:
 	var busy := _is_execution_busy(false)
 	var ipc_running := _ipc_active
 
-	language_selector.disabled = false
-	editor.editable = true
+	# A compile in flight must keep the code editor and language selector locked
+	# so Stay can't let the user edit code that _finish_cpp_check would then mark
+	# as checked against a stale build.
+	editor.editable = _compile_task_id < 0
+	language_selector.disabled = _compile_task_id >= 0
 	settings_button.disabled = false
 	library_button.disabled = false
 	reset_button.disabled = false
@@ -2463,6 +2472,8 @@ func _on_editor_text_changed() -> void:
 	checked_cpp_executable = ""
 
 func _on_check_button_pressed() -> void:
+	if _compile_task_id >= 0:
+		return
 	if _is_execution_busy():
 		_set_status("Stop the current program before checking code.", "error")
 		return
@@ -2507,9 +2518,6 @@ func _on_check_button_pressed() -> void:
 		return
 
 	# Probe the compiler on the main thread so the background compile only reads the cached result.
-	if _compile_task_id >= 0:
-		return
-
 	if compiler.is_platform_supported() and not compiler.detect_compiler():
 		log_error("A C++ compiler was not found. Please install a C++ compiler first, then restart the game.")
 		_set_status("C++ Compiler unavailable", "error")
@@ -2724,6 +2732,7 @@ func _is_execution_busy(verbose: bool = true) -> bool:
 		or _ipc_active
 		or _ipc_loop_running
 		or _subprocess_pid != -1
+		or _compile_task_id >= 0
 	)
 
 	if verbose:
