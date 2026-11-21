@@ -629,6 +629,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	flat_grid_node.visible = _is_2d_mode
 	if _is_2d_mode:
 		game_instance.camera.enabled = false
+		game_instance.visible = false
 		flat_grid_node.activate()
 	else:
 		game_instance.camera.enabled = true
