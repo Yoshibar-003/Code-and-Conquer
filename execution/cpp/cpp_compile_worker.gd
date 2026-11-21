@@ -20,25 +20,32 @@ var _cancel_requested := false
 var _finished := false
 
 
+# Thin shell: _compile_inner does all the risky work, so _finished and
+# _unregister always run even if a runtime error aborts the inner call
+# (GDScript errors don't propagate to callers).
 func run(source: String, build_dir: String) -> void:
 	_build_dir = build_dir
 	_register()
-	if _cancel_requested:
-		_set_cancelled()
-	else:
-		var duplicate := _find_duplicate()
-		if duplicate != null:
-			_reuse_duplicate(duplicate)
-		else:
-			var background_compiler = preload(Paths.CPP_DRIVER).new()
-			_driver = background_compiler
-			if not background_compiler.prepare_build_files(source, build_dir):
-				_set_error(background_compiler.get_prepare_error(), background_compiler.get_prepare_reason())
-			else:
-				result = background_compiler.compile_program()
+	_compile_inner(source, build_dir)
 	_finished = true
 	_driver = null
 	_unregister()
+
+
+func _compile_inner(source: String, build_dir: String) -> void:
+	if _cancel_requested:
+		_set_cancelled()
+		return
+	var duplicate := _find_duplicate()
+	if duplicate != null:
+		_reuse_duplicate(duplicate)
+		return
+	var background_compiler = preload(Paths.CPP_DRIVER).new()
+	_driver = background_compiler
+	if not background_compiler.prepare_build_files(source, build_dir):
+		_set_error(background_compiler.get_prepare_error(), background_compiler.get_prepare_reason())
+	else:
+		result = background_compiler.compile_program()
 
 
 # Asks this worker's compile to stop. Safe to call from any thread and before

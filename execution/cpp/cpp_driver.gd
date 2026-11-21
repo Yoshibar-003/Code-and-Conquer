@@ -111,14 +111,18 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 		_drain_pipe(stderr, output)
 		OS.delay_msec(50)
 
-	_drain_pipe(stdio, output)
-	_drain_pipe(stderr, output)
-
 	# Give a killed tree a moment to actually die, then reap the exit code.
 	var waited := 0
 	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid) and waited < 2000:
 		OS.delay_msec(50)
 		waited += 50
+	if _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
+		push_warning("Compiler process %d did not exit after kill" % _compiler_pid)
+
+	# Final drain runs once the process is gone; retry empty reads briefly so
+	# diagnostics after a blank line aren't dropped (pipe eof is unreliable).
+	_drain_pipe(stdio, output, true)
+	_drain_pipe(stderr, output, true)
 
 	var exit_code := -1
 	if _compiler_pid > 0 and not _cancel_requested:
@@ -127,13 +131,24 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 	return exit_code
 
 
-func _drain_pipe(file: FileAccess, output: Array) -> void:
+# `final` mode is used for the post-exit drain: an empty get_line() may mean
+# "no data yet" rather than a blank line, so retry a few times before giving
+# up. Mid-run polls break on the first empty read since the next tick retries.
+func _drain_pipe(file: FileAccess, output: Array, final: bool = false) -> void:
 	if file == null:
 		return
+	var empty_reads := 0
 	while not file.eof_reached():
 		var line := file.get_line()
 		if line == "":
-			break
+			if not final:
+				break
+			empty_reads += 1
+			if empty_reads > 5:
+				break
+			OS.delay_msec(20)
+			continue
+		empty_reads = 0
 		output.append(line)
 
 
