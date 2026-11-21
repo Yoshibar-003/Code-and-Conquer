@@ -34,6 +34,10 @@ func run(source: String, build_dir: String) -> void:
 	_build_dir = build_dir
 	_register()
 	_compile_inner(source, build_dir)
+	# Publication order: result is assigned inside _compile_inner before
+	# _finished flips, and _reuse_duplicate only reads result after observing
+	# _finished — Variant writes are atomic on all Godot platforms, so the
+	# poller can't observe a torn result.
 	_finished = true
 	_driver = null
 	_unregister()
@@ -128,6 +132,8 @@ func _reuse_duplicate(duplicate: CppCompileWorker) -> bool:
 	# The wait loop only exits on _finished or a cancel flag, so the duplicate
 	# is guaranteed finished here. Reject transient/empty results so the
 	# caller compiles fresh instead of reporting a spurious failure.
+	# Unsynchronized read is safe: run() writes result before _finished, and
+	# Variant access is atomic — see the publication-order note in run().
 	if duplicate.result.is_empty() \
 			or str(duplicate.result.get("reason", "")) == "cancelled":
 		return false
