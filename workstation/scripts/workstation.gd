@@ -629,6 +629,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	flat_grid_node.visible = _is_2d_mode
 	if _is_2d_mode:
 		game_instance.camera.enabled = false
+		game_instance.visible = false
 		flat_grid_node.activate()
 	else:
 		game_instance.camera.enabled = true
@@ -2019,20 +2020,24 @@ func _on_report_folder_selected(folder: String) -> void:
 
 	# capture screenshot (switch to 2D view momentarily if needed)
 	var was_2d := _is_2d_mode
-	if not was_2d and flat_grid_node != null:
-		game_instance.visible = false
-		game_instance.camera.enabled = false
-		flat_grid_node.visible = true
-		flat_grid_node.activate()
+	var shot_game := game_instance
+	var shot_flat := flat_grid_node
+	if not was_2d and shot_flat != null:
+		shot_game.visible = false
+		shot_game.camera.enabled = false
+		shot_flat.visible = true
+		shot_flat.activate()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var screenshot := game_subviewport.get_texture().get_image()
-	if not was_2d and flat_grid_node != null:
-		flat_grid_node.deactivate()
-		flat_grid_node.visible = false
-		game_instance.visible = true
-		game_instance.camera.enabled = true
-		game_instance.camera.make_current()
+	if not was_2d and shot_flat != null and not _is_2d_mode:
+		if is_instance_valid(shot_flat):
+			shot_flat.deactivate()
+			shot_flat.visible = false
+		if is_instance_valid(shot_game):
+			shot_game.visible = true
+			shot_game.camera.enabled = true
+			shot_game.camera.make_current()
 
 	var png_path := dir_path.path_join("%s_screenshot.png" % level_name)
 	screenshot.save_png(png_path)
