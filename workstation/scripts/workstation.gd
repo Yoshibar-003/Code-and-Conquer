@@ -8,6 +8,7 @@ var campaign_hint: Label
 var campaign_panel: VBoxContainer
 var campaign_next_button: Button
 var campaign_hint_button: Button
+const CAMPAIGN_PANEL_COMPASS_CLEARANCE := 140
 var sandbox_worker = preload("res://execution/shared/sandbox_worker_client.gd").new()
 var runtime_assets = preload(Paths.RUNTIME_ASSETS).new()
 # === UI references ===
@@ -444,9 +445,12 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 func _setup_campaign_ui() -> void:
 	campaign_panel = VBoxContainer.new()
 	campaign_panel.add_theme_constant_override("separation", 6)
+	var panel_margin := MarginContainer.new()
+	panel_margin.add_theme_constant_override("margin_right", CAMPAIGN_PANEL_COMPASS_CLEARANCE)
 	var column := $RootMargin/MainColumn
-	column.add_child(campaign_panel)
-	column.move_child(campaign_panel, 1)
+	column.add_child(panel_margin)
+	column.move_child(panel_margin, 1)
+	panel_margin.add_child(campaign_panel)
 	campaign_instructions = Label.new()
 	campaign_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	campaign_instructions.add_theme_font_size_override("font_size", 20)
