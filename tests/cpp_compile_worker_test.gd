@@ -45,9 +45,10 @@ func run_tests() -> void:
 	winner._finished = true
 	winner.result = {"ok": true, "output": "", "reason": "", "exe_path": "prog.exe"}
 	var adopter = CppCompileWorker.new()
-	check(adopter._reuse_duplicate(winner), "Should adopt a completed real result")
-	check(bool(adopter.result.get("ok", false)), "Adopted result should carry the original ok flag")
-	check(str(adopter.result.get("exe_path", "")) == "prog.exe", "Adopted result should carry exe_path")
+	var adopted: Dictionary = adopter._reuse_duplicate(winner)
+	check(not adopted.is_empty(), "Should adopt a completed real result")
+	check(bool(adopted.get("ok", false)), "Adopted result should carry the original ok flag")
+	check(str(adopted.get("exe_path", "")) == "prog.exe", "Adopted result should carry exe_path")
 
 	# A cancelled result is transient and must not be adopted.
 	var cancelled = CppCompileWorker.new()
@@ -55,15 +56,14 @@ func run_tests() -> void:
 	cancelled._finished = true
 	cancelled.result = {"ok": false, "output": "Compilation cancelled.", "reason": "cancelled", "exe_path": ""}
 	var reject_cancel = CppCompileWorker.new()
-	check(not reject_cancel._reuse_duplicate(cancelled), "Cancelled result must not be adopted")
-	check(reject_cancel.result.is_empty(), "Rejected result must leave worker result empty")
+	check(reject_cancel._reuse_duplicate(cancelled).is_empty(), "Cancelled result must not be adopted")
 
 	# An empty result (aborted compile) must not be adopted either.
 	var empty = CppCompileWorker.new()
 	empty._build_dir = dir_a
 	empty._finished = true
 	var reject_empty = CppCompileWorker.new()
-	check(not reject_empty._reuse_duplicate(empty), "Empty result must not be adopted")
+	check(reject_empty._reuse_duplicate(empty).is_empty(), "Empty result must not be adopted")
 
 	# A cancelled waiter reports handled instead of adopting anything.
 	var blocked = CppCompileWorker.new()
@@ -71,12 +71,31 @@ func run_tests() -> void:
 	blocked._cancel_requested = true
 	var pending = CppCompileWorker.new()
 	pending._build_dir = dir_a
-	check(blocked._reuse_duplicate(pending), "Cancelled waiter should return handled")
-	check(str(blocked.result.get("reason", "")) == "cancelled", "Cancelled waiter should produce a cancelled result")
+	var blocked_result: Dictionary = blocked._reuse_duplicate(pending)
+	check(str(blocked_result.get("reason", "")) == "cancelled", "Cancelled waiter should produce a cancelled result")
 
 	winner._unregister()
-	other_dir._unregister()
 	already_done._unregister()
+	# other_dir stays registered: unfinished, earlier seq, different dir —
+	# it would match any probe if the build-dir filter were broken.
+	var dir_probe = CppCompileWorker.new()
+	dir_probe._build_dir = "user://dedupe_test_c"
+	dir_probe._register()
+	check(dir_probe._find_duplicate() == null, "Different build dir must not dedupe")
+	dir_probe._unregister()
+
+	# A same-dir probe must not match a finished worker.
+	var fin = CppCompileWorker.new()
+	fin._build_dir = "user://dedupe_test_c"
+	fin._finished = true
+	fin._register()
+	var fin_probe = CppCompileWorker.new()
+	fin_probe._build_dir = "user://dedupe_test_c"
+	fin_probe._register()
+	check(fin_probe._find_duplicate() == null, "Finished worker must not dedupe")
+	fin_probe._unregister()
+	fin._unregister()
+	other_dir._unregister()
 
 	print("CPP COMPILE WORKER TESTS: %d failures" % failures)
 	quit(0 if failures == 0 else 1)

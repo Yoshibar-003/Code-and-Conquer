@@ -1121,9 +1121,10 @@ func _is_program_finished() -> bool:
 # whether execution is still busy. Used to make terminal handlers idempotent
 # so a stray late signal cannot show a second result popup.
 func _has_terminal_outcome() -> bool:
-	if _is_handling_lose or _run_outcome != "incomplete":
-		return true
-	return _run_had_error and not _is_execution_busy(false)
+	# _run_had_error counts immediately: [ERROR] is already a terminal state
+	# (the IPC loop reports "Error" and locks controls), so a win/lose signal
+	# arriving while the subprocess winds down must not replace it.
+	return _is_handling_lose or _run_had_error or _run_outcome != "incomplete"
 
 
 func _refresh_program_controls() -> void:

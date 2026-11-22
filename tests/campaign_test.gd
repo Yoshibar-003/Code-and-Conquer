@@ -272,6 +272,18 @@ func run_tests() -> void:
 	workstation._set_controls_disabled(false)
 	check(not workstation.run_button.disabled, "Unlocked compile finish must restore Run")
 
+	# Level switching must be refused while a compile is in flight. The
+	# fixture leaves _loaded_level_path unset, so establish it first —
+	# production always sets it in _ready.
+	var previous_path: String = root.get_node("SelectedLevel").path
+	workstation._loaded_level_path = previous_path
+	workstation._compile_task_id = 12345
+	root.get_node("SelectedLevel").path = Campaign.LEVELS[1].path
+	workstation._switch_level()
+	check(root.get_node("SelectedLevel").path == previous_path, "Compile must block level switching")
+	check(workstation._loaded_level_path == previous_path, "Compile must keep the loaded level")
+	workstation._compile_task_id = -1
+
 	# A terminal outcome must evict transient popups and block stray signals.
 	workstation.menu_confirm_overlay.visible = true
 	workstation.settings_overlay.visible = true

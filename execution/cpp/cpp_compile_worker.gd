@@ -27,29 +27,31 @@ var _finished := false
 var _seq := -1
 
 
-# Thin shell: _compile_inner does all the risky work, so _finished and
-# _unregister always run even if a runtime error aborts the inner call
-# (GDScript errors don't propagate to callers).
+# Thin shell: _compile_inner does all the risky work and returns the result
+# dict, so _finished/_unregister always run even if a runtime error aborts
+# the inner call (GDScript errors don't propagate to callers). result and
+# _finished are published together under _mutex so a dedupe waiter can't
+# observe completion before the result is visible.
 func run(source: String, build_dir: String) -> void:
 	_build_dir = build_dir
 	_register()
-	_compile_inner(source, build_dir)
-	# Publication order: result is assigned inside _compile_inner before
-	# _finished flips, and _reuse_duplicate only reads result after observing
-	# _finished — Variant writes are atomic on all Godot platforms, so the
-	# poller can't observe a torn result.
+	var res = _compile_inner(source, build_dir)
+	_mutex.lock()
+	result = res if res is Dictionary else {}
 	_finished = true
+	_mutex.unlock()
 	_driver = null
 	_unregister()
 
 
-func _compile_inner(source: String, build_dir: String) -> void:
+func _compile_inner(source: String, build_dir: String) -> Variant:
 	if _cancel_requested or _cancel_all_requested:
-		_set_cancelled()
-		return
+		return _cancelled_result()
 	var duplicate := _find_duplicate()
-	if duplicate != null and _reuse_duplicate(duplicate):
-		return
+	if duplicate != null:
+		var reused: Dictionary = _reuse_duplicate(duplicate)
+		if not reused.is_empty():
+			return reused
 	var background_compiler = preload(Paths.CPP_DRIVER).new()
 	_driver = background_compiler
 	# A cancel may have landed while finding a duplicate but before the driver
@@ -57,9 +59,8 @@ func _compile_inner(source: String, build_dir: String) -> void:
 	if _cancel_requested or _cancel_all_requested:
 		_driver.cancel_compile()
 	if not background_compiler.prepare_build_files(source, build_dir):
-		_set_error(background_compiler.get_prepare_error(), background_compiler.get_prepare_reason())
-	else:
-		result = background_compiler.compile_program()
+		return _error_result(background_compiler.get_prepare_error(), background_compiler.get_prepare_reason())
+	return background_compiler.compile_program()
 
 
 # Asks this worker's compile to stop. Safe to call from any thread and before
@@ -120,30 +121,34 @@ func _find_duplicate() -> CppCompileWorker:
 	return duplicate
 
 
-# Returns false when the duplicate's result shouldn't be adopted (a cancelled
-# compile is transient, not a property of the source), so the caller compiles
-# fresh instead of reporting a spurious failure.
-func _reuse_duplicate(duplicate: CppCompileWorker) -> bool:
-	while not duplicate._finished and not _cancel_requested and not _cancel_all_requested:
+# Returns the duplicate's result to adopt, or {} when it shouldn't be
+# adopted (a cancelled/empty result is transient, not a property of the
+# source) so the caller compiles fresh instead of reporting a spurious
+# failure.
+func _reuse_duplicate(duplicate: CppCompileWorker) -> Dictionary:
+	while true:
+		_mutex.lock()
+		var done: bool = duplicate._finished
+		_mutex.unlock()
+		if done or _cancel_requested or _cancel_all_requested:
+			break
 		OS.delay_msec(100)
 	if _cancel_requested or _cancel_all_requested:
-		_set_cancelled()
-		return true
+		return _cancelled_result()
 	# The wait loop only exits on _finished or a cancel flag, so the duplicate
-	# is guaranteed finished here. Reject transient/empty results so the
-	# caller compiles fresh instead of reporting a spurious failure.
-	# Unsynchronized read is safe: run() writes result before _finished, and
-	# Variant access is atomic — see the publication-order note in run().
-	if duplicate.result.is_empty() \
-			or str(duplicate.result.get("reason", "")) == "cancelled":
-		return false
-	result = duplicate.result.duplicate()
-	return true
+	# is guaranteed finished here. Read result under the mutex: run() publishes
+	# result and _finished together, so this can't observe a torn state.
+	_mutex.lock()
+	var res: Dictionary = duplicate.result.duplicate()
+	_mutex.unlock()
+	if res.is_empty() or str(res.get("reason", "")) == "cancelled":
+		return {}
+	return res
 
 
-func _set_error(output: String, reason: String) -> void:
-	result = {"ok": false, "output": output, "reason": reason, "exe_path": ""}
+func _error_result(output: String, reason: String) -> Dictionary:
+	return {"ok": false, "output": output, "reason": reason, "exe_path": ""}
 
 
-func _set_cancelled() -> void:
-	_set_error("Compilation cancelled.", "cancelled")
+func _cancelled_result() -> Dictionary:
+	return _error_result("Compilation cancelled.", "cancelled")

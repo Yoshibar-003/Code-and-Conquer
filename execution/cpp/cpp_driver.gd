@@ -1,6 +1,7 @@
 extends RefCounted
 
 const BUILD_DIR := "user://build"
+const COMPILE_TIMEOUT_MSEC := 300000
 const Paths = preload("res://execution/shared/paths.gd")
 
 var _commands = preload(Paths.ROBOT_COMMANDS).new()
@@ -104,8 +105,13 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 	var stdio: FileAccess = pipes.get("stdio")
 	var stderr: FileAccess = pipes.get("stderr")
 
+	var start_msec := Time.get_ticks_msec()
 	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
 		if _cancel_requested:
+			_kill_process_tree(_compiler_pid)
+			break
+		if Time.get_ticks_msec() - start_msec > COMPILE_TIMEOUT_MSEC:
+			push_warning("Compiler timed out after %d ms; killing process tree" % COMPILE_TIMEOUT_MSEC)
 			_kill_process_tree(_compiler_pid)
 			break
 		_drain_pipe(stdio, output)
@@ -172,8 +178,14 @@ func _kill_process_tree(pid: int) -> void:
 	if OS.get_name() == "Windows":
 		OS.execute("taskkill", ["/F", "/T", "/PID", str(pid)], [], true)
 		return
-	for child in _child_pids(pid):
-		_kill_process_tree(child)
+	# Snapshot-and-kill descendants a few times: a child spawned between
+	# snapshots is caught on the next pass, all before the parent dies.
+	for _pass in range(3):
+		var children := _child_pids(pid)
+		if children.is_empty():
+			break
+		for child in children:
+			_kill_process_tree(child)
 	if OS.is_process_running(pid):
 		OS.kill(pid)
 
@@ -188,14 +200,18 @@ func _child_pids(pid: int) -> Array[int]:
 		if OS.execute("ps", ["-eo", "pid=,ppid="], out, true) != OK:
 			return children
 		for entry in out:
-			var fields := str(entry).split(" ", false)
-			if fields.size() >= 2 and fields[1].to_int() == pid and fields[0].is_valid_int():
-				children.append(int(fields[0]))
+			for line in str(entry).split("\n"):
+				var fields := line.split(" ", false)
+				if fields.size() >= 2 and fields[1].to_int() == pid and fields[0].is_valid_int():
+					children.append(int(fields[0]))
 		return children
+	# OS.execute returns all stdout as ONE array element with embedded
+	# newlines, so each entry must be split into lines before parsing.
 	for entry in out:
-		var text := str(entry).strip_edges()
-		if text.is_valid_int():
-			children.append(int(text))
+		for line in str(entry).split("\n"):
+			var text := line.strip_edges()
+			if text.is_valid_int():
+				children.append(int(text))
 	return children
 
 
@@ -272,13 +288,15 @@ func compile_program() -> Dictionary:
 		cache.set_value("runtime", "object_hash", runtime_object_hash)
 		cache.save(cache_path)
 
-	# Failed builds must not reuse an older successful executable.
+	# Failed builds must not reuse an older successful executable, but the
+	# previous exe is kept until the new one links successfully: compile to a
+	# temp file and publish via rename so a failed/cancelled recheck can't
+	# destroy the build the workstation may still run.
 	if cache.has_section("build"):
 		cache.erase_section("build")
 	cache.save(cache_path)
-	if FileAccess.file_exists(exe):
-		DirAccess.remove_absolute(exe)
-	args.append_array([student_cpp, runtime_object, "-o", exe])
+	var tmp_exe := exe + ".tmp"
+	args.append_array([student_cpp, runtime_object, "-o", tmp_exe])
 	if OS.get_name() == "Windows":
 		args.append("-lws2_32")
 
@@ -287,11 +305,24 @@ func compile_program() -> Dictionary:
 
 	var exit_code := _run_cancellable(compiler, args, output)
 	if _cancel_requested:
+		if FileAccess.file_exists(tmp_exe):
+			DirAccess.remove_absolute(tmp_exe)
 		return _cancelled_result()
 	var diagnostics := "\n".join(output)
 	if exit_code == 0:
+		if FileAccess.file_exists(exe):
+			DirAccess.remove_absolute(exe)
+		if DirAccess.rename_absolute(tmp_exe, exe) != OK:
+			return {
+				"ok": false,
+				"output": "Compiled executable could not be published.",
+				"reason": "internal_error",
+				"exe_path": ""
+			}
 		cache.set_value("build", "key", build_key)
 		cache.set_value("build", "exe_hash", FileAccess.get_sha256(exe))
+	elif FileAccess.file_exists(tmp_exe):
+		DirAccess.remove_absolute(tmp_exe)
 	cache.save(cache_path)
 	return {
 		"ok": exit_code == 0,
