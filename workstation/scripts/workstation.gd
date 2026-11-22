@@ -439,7 +439,7 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 	run_button.disabled = _controls_locked or not has_checked_code
 	step_button.disabled = _controls_locked or not has_checked_code
 	_set_status("C++ compiled successfully — ready to run.", "")
-	log_line("C++ code unchanged — previous build reused." if build.get("cached", false) else "C++ compilation passed.")
+	log_line("C++ build reused — identical source compiled previously." if build.get("cached", false) else "C++ compilation passed.")
 
 func _setup_campaign_ui() -> void:
 	campaign_panel = VBoxContainer.new()
