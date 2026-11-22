@@ -476,6 +476,18 @@ func _setup_campaign_ui() -> void:
 	campaign_next_button = Button.new()
 	campaign_next_button.text = "Next Level"
 	campaign_next_button.custom_minimum_size.y = 36
+	campaign_next_button.add_theme_font_size_override("font_size", 15)
+	campaign_next_button.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	var next_style := StyleBoxFlat.new()
+	next_style.bg_color = Color(0.35, 0.24, 0.07, 1)
+	next_style.border_color = Color(0.95, 0.75, 0.3, 1)
+	next_style.set_border_width_all(1)
+	next_style.set_corner_radius_all(6)
+	next_style.content_margin_left = 20
+	next_style.content_margin_right = 20
+	next_style.content_margin_top = 8
+	next_style.content_margin_bottom = 8
+	campaign_next_button.add_theme_stylebox_override("normal", next_style)
 	campaign_next_button.pressed.connect(_on_win_next)
 	var buttons := $WinOverlay/WinCard/WinContent/WinButtons
 	buttons.add_child(campaign_next_button)
