@@ -325,6 +325,10 @@ func compile_program() -> Dictionary:
 		var old_exe := exe + ".old"
 		var moved_old := false
 		if FileAccess.file_exists(exe):
+			# Clear a stale .old left by a crash between the two renames —
+			# rename can't overwrite on Windows, so it would fail forever.
+			if FileAccess.file_exists(old_exe):
+				DirAccess.remove_absolute(old_exe)
 			moved_old = DirAccess.rename_absolute(exe, old_exe) == OK
 			if not moved_old:
 				if FileAccess.file_exists(tmp_exe):
