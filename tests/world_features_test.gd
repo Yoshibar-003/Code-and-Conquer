@@ -264,14 +264,13 @@ func run_tests() -> void:
 	carry_world.player.move_finished.connect(func(): move_done[0] = true)
 	carry_world.player.move_forward(0.3)
 	await process_frame
+	var progress := float(carry_world.player._move_progress())
 	carry_world.rotate_world_right()
-	await process_frame
 	var from_pos: Vector2 = carry_world.player_grid_position(1, 1)
 	var to_pos: Vector2 = carry_world.player_grid_position(2, 1)
-	var d_from: float = carry_world.player.position.distance_to(from_pos)
-	var d_to: float = carry_world.player.position.distance_to(to_pos)
-	var seg_len: float = from_pos.distance_to(to_pos)
-	check(d_from > 1.0 and d_to > 1.0 and d_from + d_to <= seg_len + 1.0, "Rotation must preserve the mid-move position instead of snapping to a cell")
+	var expected_pos: Vector2 = from_pos.lerp(to_pos, progress)
+	check(carry_world.player.position.distance_to(expected_pos) < 2.0, "Rotation must preserve the in-progress position along the move")
+	await process_frame
 	var move_waited := 0.0
 	while not move_done[0] and move_waited < 1.0:
 		await create_timer(0.05).timeout
