@@ -2568,9 +2568,12 @@ func _on_check_button_pressed() -> void:
 		return
 
 	var generated: Dictionary = generator.generate(source)
-	# Key the build dir by source content so concurrent instances can't share artifacts.
+	# Key the build dir by source content + process id: workers within this
+	# process still dedupe onto the same dir, but a second game instance can't
+	# race this process on the shared artifacts inside it.
 	var check_build_root := ProjectSettings.globalize_path("user://checked_build")
-	var check_build_dir := check_build_root.path_join(str(generated.generated_source).sha256_text())
+	var check_build_dir := check_build_root.path_join(
+		str(generated.generated_source).sha256_text() + "_" + str(OS.get_process_id()))
 	_prune_stale_cpp_build_dirs(check_build_root, check_build_dir.get_file())
 
 	check_button.disabled = true
