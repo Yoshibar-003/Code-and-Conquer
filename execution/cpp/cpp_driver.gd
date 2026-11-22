@@ -106,6 +106,7 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 	var stderr: FileAccess = pipes.get("stderr")
 
 	var start_msec := Time.get_ticks_msec()
+	var timed_out := false
 	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
 		if _cancel_requested:
 			_kill_process_tree(_compiler_pid)
@@ -113,6 +114,7 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 		if Time.get_ticks_msec() - start_msec > COMPILE_TIMEOUT_MSEC:
 			push_warning("Compiler timed out after %d ms; killing process tree" % COMPILE_TIMEOUT_MSEC)
 			_kill_process_tree(_compiler_pid)
+			timed_out = true
 			break
 		_drain_pipe(stdio, output)
 		_drain_pipe(stderr, output)
@@ -143,7 +145,12 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 		var reaped := OS.get_process_exit_code(_compiler_pid)
 		if not _cancel_requested:
 			exit_code = reaped
-	_compiler_pid = -1
+		if not OS.is_process_running(_compiler_pid):
+			_compiler_pid = -1
+		# If the process survived the kill, keep the PID so the state stays
+		# accurate; the push_warning above already flagged the orphan.
+	if timed_out and not _cancel_requested:
+		return -3  # timeout, distinct from cancel (-1) and spawn failure (-2)
 	return exit_code
 
 
@@ -274,6 +281,8 @@ func compile_program() -> Dictionary:
 			return _cancelled_result()
 		if runtime_code == -2:
 			return {"ok": false, "output": "Failed to launch the C++ compiler.", "reason": "internal_error", "exe_path": ""}
+		if runtime_code == -3:
+			return {"ok": false, "output": "Compilation timed out.", "reason": "timeout", "exe_path": ""}
 		if runtime_code != 0:
 			return {"ok": false, "output": "\n".join(output), "reason": "runtime_error", "exe_path": ""}
 		var runtime_object_hash := FileAccess.get_sha256(runtime_object)
@@ -310,24 +319,50 @@ func compile_program() -> Dictionary:
 		return _cancelled_result()
 	var diagnostics := "\n".join(output)
 	if exit_code == 0:
+		# Publish via rename without ever leaving exe missing: move the old
+		# exe aside first (rename can't overwrite on Windows), then restore it
+		# if publishing the new build fails.
+		var old_exe := exe + ".old"
+		var moved_old := false
 		if FileAccess.file_exists(exe):
-			DirAccess.remove_absolute(exe)
+			moved_old = DirAccess.rename_absolute(exe, old_exe) == OK
+			if not moved_old:
+				if FileAccess.file_exists(tmp_exe):
+					DirAccess.remove_absolute(tmp_exe)
+				return {
+					"ok": false,
+					"output": "Previous executable could not be moved aside.",
+					"reason": "internal_error",
+					"exe_path": ""
+				}
 		if DirAccess.rename_absolute(tmp_exe, exe) != OK:
+			if moved_old and not FileAccess.file_exists(exe) \
+					and FileAccess.file_exists(old_exe):
+				DirAccess.rename_absolute(old_exe, exe)
+			if FileAccess.file_exists(tmp_exe):
+				DirAccess.remove_absolute(tmp_exe)
 			return {
 				"ok": false,
 				"output": "Compiled executable could not be published.",
 				"reason": "internal_error",
 				"exe_path": ""
 			}
+		if moved_old and FileAccess.file_exists(old_exe):
+			DirAccess.remove_absolute(old_exe)
 		cache.set_value("build", "key", build_key)
 		cache.set_value("build", "exe_hash", FileAccess.get_sha256(exe))
 	elif FileAccess.file_exists(tmp_exe):
 		DirAccess.remove_absolute(tmp_exe)
 	cache.save(cache_path)
+	var failure_output := diagnostics
+	if exit_code == -2:
+		failure_output = "Failed to launch the C++ compiler."
+	elif exit_code == -3:
+		failure_output = "Compilation timed out."
 	return {
 		"ok": exit_code == 0,
-		"output": diagnostics if exit_code != -2 else "Failed to launch the C++ compiler.",
-		"reason": "" if exit_code == 0 else ("internal_error" if exit_code == -2 else "compile_error"),
+		"output": failure_output,
+		"reason": "" if exit_code == 0 else ("timeout" if exit_code == -3 else ("internal_error" if exit_code == -2 else "compile_error")),
 		"cached": false,
 		"exe_path": exe if exit_code == 0 else ""
 	}

@@ -45,10 +45,15 @@ func run(source: String, build_dir: String) -> void:
 
 
 func _compile_inner(source: String, build_dir: String) -> Variant:
-	if _cancel_requested or _cancel_all_requested:
-		return _cancelled_result()
-	var duplicate := _find_duplicate()
-	if duplicate != null:
+	# Loop because a rejected duplicate (cancelled/empty result) sends this
+	# worker back to _find_duplicate, where it can adopt another waiter that
+	# is now the earliest registrant; serializing rebuilds of the same dir.
+	while true:
+		if _cancel_requested or _cancel_all_requested:
+			return _cancelled_result()
+		var duplicate := _find_duplicate()
+		if duplicate == null:
+			break
 		var reused: Dictionary = _reuse_duplicate(duplicate)
 		if not reused.is_empty():
 			return reused

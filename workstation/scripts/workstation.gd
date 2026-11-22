@@ -415,6 +415,9 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 			"runtime_error":
 				log_error(raw_output)
 				_set_status("C++ runtime build failed", "error")
+			"timeout":
+				log_error(raw_output)
+				_set_status("Compile timed out", "error")
 			"cancelled":
 				_set_status("Compile cancelled.", "")
 			_:
