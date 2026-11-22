@@ -181,7 +181,17 @@ func _kill_process_tree(pid: int) -> void:
 func _child_pids(pid: int) -> Array[int]:
 	var children: Array[int] = []
 	var out: Array = []
-	OS.execute("pgrep", ["-P", str(pid)], out, true)
+	# pgrep is procps-only; fall back to ps (POSIX) on minimal systems so
+	# compiler children don't get orphaned when pgrep is missing.
+	if OS.execute("pgrep", ["-P", str(pid)], out, true) != OK or out.is_empty():
+		out.clear()
+		if OS.execute("ps", ["-eo", "pid=,ppid="], out, true) != OK:
+			return children
+		for entry in out:
+			var fields := str(entry).split(" ", false)
+			if fields.size() >= 2 and fields[1].to_int() == pid and fields[0].is_valid_int():
+				children.append(int(fields[0]))
+		return children
 	for entry in out:
 		var text := str(entry).strip_edges()
 		if text.is_valid_int():

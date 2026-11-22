@@ -845,6 +845,9 @@ func _setup_python_highlighting() -> void:
 # === button handlers ===
 
 func _on_run_button_pressed() -> void:
+	if _compile_task_id >= 0:
+		return
+
 	if _ipc_active:
 		if _paused:
 			if _step_index < _cmd_history.size():
@@ -2566,9 +2569,7 @@ func _on_check_button_pressed() -> void:
 	)
 
 	if _compile_task_id < 0:
-		check_button.disabled = false
-		editor.editable = true
-		language_selector.disabled = false
+		_restore_workspace_controls()
 		log_error("Could not start the C++ compiler task.")
 		_set_status("Compile failed", "error")
 		return
