@@ -253,6 +253,31 @@ func run_tests() -> void:
 	var bad_carry_level: Dictionary = doc.data.duplicate(true)
 	bad_carry_level["goal"]["require_carry"] = {"apple": "lots"}
 	check(not restored.load_level(bad_carry_level).ok, "Level editor must reject malformed carry requirements")
+
+	# Rotating the camera mid-move must retarget the tween instead of killing
+	# it: move_finished must still fire and the player must land on the
+	# rotated destination cell.
+	carry_world.player.grid_x = 1
+	carry_world.player.grid_y = 1
+	carry_world.player.facing = "east"
+	var move_done := [false]
+	carry_world.player.move_finished.connect(func(): move_done[0] = true)
+	carry_world.player.move_forward(0.3)
+	await process_frame
+	var progress := float(carry_world.player._move_progress())
+	carry_world.rotate_world_right()
+	var from_pos: Vector2 = carry_world.player_grid_position(1, 1)
+	var to_pos: Vector2 = carry_world.player_grid_position(2, 1)
+	var expected_pos: Vector2 = from_pos.lerp(to_pos, progress)
+	check(carry_world.player.position.distance_to(expected_pos) < 2.0, "Rotation must preserve the in-progress position along the move")
+	await process_frame
+	var move_waited := 0.0
+	while not move_done[0] and move_waited < 1.0:
+		await create_timer(0.05).timeout
+		move_waited += 0.05
+	check(move_done[0], "Camera rotation during a move must not swallow move_finished")
+	check(carry_world.player.grid_x == 2 and carry_world.player.grid_y == 1, "Rotated move must still advance one cell")
+	check(carry_world.player.position.distance_to(carry_world.player_grid_position(2, 1)) < 1.0, "Player must retarget to the rotated destination")
 	carry_world.queue_free()
 	await process_frame
 

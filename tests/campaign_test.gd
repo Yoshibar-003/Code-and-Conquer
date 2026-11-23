@@ -78,8 +78,13 @@ func _right_of(facing: String) -> String:
 # 15_labyrinth.cpp reference solution).
 func _solve_labyrinth(world, player) -> void:
 	var iterations := 0
-	while not world.is_at_goal(player.grid_x, player.grid_y) and iterations < 2000:
+	var needs_token: bool = world.level_data.has("objects") and not world.level_data["objects"].is_empty()
+	var carrying := not needs_token
+	while not (carrying and world.is_at_goal(player.grid_x, player.grid_y)) and iterations < 2000:
 		iterations += 1
+		if not carrying and world.tile_has_any_object(player.grid_x, player.grid_y):
+			player.pick_object()
+			carrying = true
 		if not world.is_move_blocked(player.grid_x, player.grid_y, _right_of(player.facing)):
 			player.turn_left()
 			player.turn_left()
@@ -90,6 +95,9 @@ func _solve_labyrinth(world, player) -> void:
 		else:
 			player.turn_left()
 	check(world.is_at_goal(player.grid_x, player.grid_y), "Labyrinth must be solvable by wall following")
+	if needs_token:
+		player.put_object()
+		check(world.are_goal_objects_satisfied(), "Labyrinth token must be delivered to the goal")
 
 func run_tests() -> void:
 	check(Campaign.LEVELS.size() == 15, "Campaign must have fifteen levels")
@@ -187,6 +195,115 @@ func run_tests() -> void:
 	workstation._on_language_changed(1)
 	await process_frame
 	check(workstation.editor.text.begins_with("from robot"), "Python selection must load Python scaffold")
+
+	# A finished run must lock code/level actions until the level is reset.
+	workstation._run_had_error = true
+	workstation._refresh_program_controls()
+	check(workstation.check_button.disabled, "Finished programs must disable Check Code")
+	check(workstation.level_button.disabled, "Finished programs must disable Change Level")
+	check(workstation.run_button.disabled, "Finished programs must disable Run")
+	workstation._run_had_error = false
+	workstation._set_controls_disabled(false)
+	check(not workstation.check_button.disabled, "Resettable programs must enable Check Code")
+	check(not workstation.level_button.disabled, "Resettable programs must enable Change Level")
+
+	# Stay on Leave Level during a run must restore run-state controls.
+	workstation._run_pending = true
+	workstation._ipc_active = true
+	workstation._set_controls_disabled(true)
+	workstation._set_controls_disabled(false)
+	check(not workstation.run_button.disabled, "Stay during run must keep Pause available")
+	check(workstation.run_button.text == "❚❚ Pause", "Stay during run must restore Pause label")
+	check(workstation.step_button.disabled, "Stay during run must not enable Step")
+	check(workstation.prev_button.disabled, "Stay during run must not enable Prev")
+	check(workstation.check_button.disabled, "Stay during run must keep Check Code disabled")
+	check(workstation.level_button.disabled, "Stay during run must keep Change Level disabled")
+
+	workstation._paused = true
+	workstation._step_index = 1
+	workstation._set_controls_disabled(true)
+	workstation._set_controls_disabled(false)
+	check(not workstation.step_button.disabled, "Stay while paused must re-enable Step")
+	check(not workstation.prev_button.disabled, "Stay while paused must re-enable Prev")
+
+	workstation._ipc_active = false
+	workstation._run_pending = false
+	workstation._paused = false
+	workstation._step_index = 0
+	workstation._set_controls_disabled(false)
+
+	# A compile in flight must keep the code editor and language selector locked
+	# across Leave Level -> Stay, and count as busy for level-switch guards.
+	workstation._compile_task_id = 12345
+	check(workstation._is_execution_busy(), "Compile must count as busy")
+	workstation._set_controls_disabled(true)
+	workstation._set_controls_disabled(false)
+	check(not workstation.editor.editable, "Stay during compile must keep editor locked")
+	check(workstation.language_selector.disabled, "Stay during compile must keep language selector locked")
+	check(workstation.run_button.disabled, "Stay during compile must keep Run disabled")
+	workstation._compile_task_id = -1
+	workstation._set_controls_disabled(false)
+	check(workstation.editor.editable, "Compile finish must restore editor")
+	check(not workstation.language_selector.disabled, "Compile finish must restore language selector")
+
+	# Reset during a compile must not re-enable Run/Step behind the busy state.
+	workstation.has_checked_code = true
+	workstation._compile_task_id = 12345
+	workstation._on_reset_button_pressed()
+	check(workstation.run_button.disabled, "Reset during compile must keep Run disabled")
+	check(workstation.step_button.disabled, "Reset during compile must keep Step disabled")
+	workstation.has_checked_code = true
+	workstation._compile_task_id = -1
+	workstation._set_controls_disabled(false)
+	check(not workstation.run_button.disabled, "Compile finish must restore Run")
+	check(not workstation.step_button.disabled, "Compile finish must restore Step")
+
+	# A compile finishing while the UI is locked (e.g. Leave Level? open) must
+	# not re-enable Run/Step behind the dialog.
+	workstation._controls_locked = true
+	workstation._compile_worker = CppCompileWorker.new()
+	workstation._compile_worker.result = {"ok": true, "output": "", "reason": "", "exe_path": "prog.exe", "cached": false}
+	workstation._compile_task_id = WorkerThreadPool.add_task(func(): pass, false, "compile-finish-test")
+	await workstation._finish_cpp_check(workstation.editor.text, 0)
+	check(workstation.run_button.disabled, "Locked compile finish must keep Run disabled")
+	check(workstation.step_button.disabled, "Locked compile finish must keep Step disabled")
+	check(not workstation.editor.editable, "Locked compile finish must keep editor locked")
+	workstation._controls_locked = false
+	workstation._set_controls_disabled(false)
+	check(not workstation.run_button.disabled, "Unlocked compile finish must restore Run")
+
+	# Level switching must be refused while a compile is in flight. The
+	# fixture leaves _loaded_level_path unset, so establish it first —
+	# production always sets it in _ready.
+	var previous_path: String = root.get_node("SelectedLevel").path
+	workstation._loaded_level_path = previous_path
+	workstation._compile_task_id = 12345
+	root.get_node("SelectedLevel").path = Campaign.LEVELS[1].path
+	workstation._switch_level()
+	check(root.get_node("SelectedLevel").path == previous_path, "Compile must block level switching")
+	check(workstation._loaded_level_path == previous_path, "Compile must keep the loaded level")
+	workstation._compile_task_id = -1
+
+	# A terminal outcome must evict transient popups and block stray signals.
+	workstation.menu_confirm_overlay.visible = true
+	workstation.settings_overlay.visible = true
+	workstation._on_level_complete()
+	check(workstation.win_overlay.visible, "Win must show after level complete")
+	check(not workstation.menu_confirm_overlay.visible, "Win must hide Leave Level popup")
+	check(not workstation.settings_overlay.visible, "Win must hide Settings")
+	workstation._on_player_lose("stray lose")
+	workstation._trigger_incomplete_lose("stray incomplete")
+	workstation._trigger_time_limit_lose()
+	workstation._on_execution_done()
+	check(workstation.win_overlay.visible, "Stray lose/done signals must not replace win")
+	check(not workstation.lose_overlay.visible, "Stray lose must not show lose popup")
+	check(not workstation.done_overlay.visible, "Stray done must not show done popup")
+	check(workstation._run_outcome == "win", "Stray signals must not change terminal outcome")
+	workstation.get_node("WinSound").stop()
+	workstation._on_win_retry()
+	await process_frame
+	check(workstation._run_outcome == "incomplete", "Retry must clear terminal outcome")
+
 	for i in range(Campaign.LEVELS.size()):
 		# Level loads must reset run state themselves; the test moves the
 		# player directly, so it relies on production doing this reset.
@@ -205,6 +322,8 @@ func run_tests() -> void:
 					workstation.player_node.turn_left()
 		workstation.game_instance.check_win_condition(workstation.player_node.grid_x, workstation.player_node.grid_y)
 		check(workstation.win_overlay.visible, "Campaign victory must show overlay")
+		check(workstation.check_button.disabled, "Victory must disable Check Code")
+		check(workstation.level_button.disabled, "Victory must disable Change Level")
 		check(Campaign.LEVELS[i].id in Campaign.completed_ids(save_path), "Workstation victory must save completion")
 		# Headless audio never finishes a playback, so each play() would
 		# orphan the previous one. Stop the win sound between victories.
@@ -215,6 +334,8 @@ func run_tests() -> void:
 			await process_frame
 			check(root.get_node("SelectedLevel").path == Campaign.LEVELS[i + 1].path, "Next Level must select next map")
 			check(workstation.editor.text.begins_with("from robot"), "Next Level must preserve Python selection")
+			check(not workstation.check_button.disabled, "Next Level must re-enable Check Code")
+			check(not workstation.level_button.disabled, "Next Level must re-enable Change Level")
 		else:
 			check(not workstation.campaign_next_button.visible, "Final level must hide Next Level")
 			check(workstation.get_node("WinOverlay/WinCard/WinContent/WinTitle").text == "Campaign Complete!", "Final victory must celebrate campaign completion")
@@ -222,6 +343,8 @@ func run_tests() -> void:
 	workstation._on_win_retry()
 	await process_frame
 	check(not workstation.win_overlay.visible and workstation.editor.editable, "Replay must restore controls")
+	check(not workstation.check_button.disabled, "Replay must re-enable Check Code")
+	check(not workstation.level_button.disabled, "Replay must re-enable Change Level")
 	# Stop win audio before freeing so its playback doesn't leak at exit.
 	for player in workstation.find_children("*", "AudioStreamPlayer", true, false):
 		player.stop()

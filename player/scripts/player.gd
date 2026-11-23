@@ -14,6 +14,14 @@ var facing: String = "north"
 var carried_object: Dictionary = {}
 var _has_lost: bool = false
 var current_tween: Tween
+var _move_in_progress: bool = false
+var _active_tween_duration: float = 0.0
+var _active_tween_start_msec: int = 0
+var _active_tween_is_fall: bool = false
+var _move_from_x: int = 0
+var _move_from_y: int = 0
+var _move_duration: float = 0.0
+var _move_start_msec: int = 0
 
 func _ready() -> void:
 	pass
@@ -60,12 +68,21 @@ func update_animation(is_running: bool = false) -> void:
 
 ## Initialize player at proper location and face direction
 func initialize_from_level(robot_data: Dictionary, world_pos: Vector2, is_rotating: bool) -> void:
-	# Prevent the tween from fighting the sudden camera snap
-	if current_tween and current_tween.is_running():
-		current_tween.kill()
+	var tween_running := current_tween != null and is_instance_valid(current_tween) and current_tween.is_running()
 
-	# Snap to the rotated coordinates instantly
-	position = world_pos
+	# During camera rotation, an in-flight move tween must be retargeted to the
+	# rotated destination instead of killed (or move_forward() would never emit
+	# move_finished and the workstation would treat the run as stuck).
+	if is_rotating and tween_running:
+		_retarget_active_tween(world_pos)
+	else:
+		if tween_running:
+			current_tween.kill()
+		current_tween = null
+		position = world_pos
+		_active_tween_duration = 0.0
+		_active_tween_is_fall = false
+		_move_duration = 0.0
 
 	if not is_rotating:
 		modulate.a = 1.0
@@ -77,12 +94,13 @@ func initialize_from_level(robot_data: Dictionary, world_pos: Vector2, is_rotati
 			carried_object = robot_objects.duplicate()
 		grid_x = robot_data.get("x", 1)
 		grid_y = robot_data.get("y", 1)
-		
+		_move_in_progress = false
+
 		var start_face: int = robot_data.get("_orientation", 1)
 		facing = DIRS[start_face]
-	
+
 	# Whether brand new or just rotating, update the visual sprite
-	update_animation(false)
+	update_animation(_move_in_progress)
 
 ## Check if we are inside a parent and gives node acces
 func _get_world() -> Node:
@@ -117,8 +135,11 @@ func move_forward(duration: float = 0.5) -> void:
 			return
 	# -------------------------------------------------------
 
+	_move_from_x = grid_x
+	_move_from_y = grid_y
 	grid_x = next_x
 	grid_y = next_y
+	_move_in_progress = true
 
 	# Play running animation
 	update_animation(true)
@@ -126,23 +147,105 @@ func move_forward(duration: float = 0.5) -> void:
 	# Obtain next logical coordinate position and move
 	if world.has_method("player_grid_position"):
 		var target_pos: Vector2 = world.player_grid_position(grid_x, grid_y)
-		
-		# Assign it to the class variable so initialize_from_level can stop it if needed
-		current_tween = create_tween()
-		current_tween.tween_property(self, "position", target_pos, duration)
-		await current_tween.finished
-	
+		_start_move_tween(target_pos, duration)
+		await _wait_seconds(duration)
+
+	_move_in_progress = false
+
 	# Stop running animation
 	update_animation(false)
 	if world.is_void(grid_x, grid_y):
-		current_tween = create_tween()
-		current_tween.set_parallel(true)
-		current_tween.tween_property(self, "modulate:a", 0.0, maxf(duration, 0.15))
-		current_tween.tween_property(self, "position:y", position.y + 80.0, maxf(duration, 0.15))
-		await current_tween.finished
+		var fall_duration := maxf(duration, 0.15)
+		_start_fall_tween(fall_duration)
+		await _wait_seconds(fall_duration)
 		_trigger_lose("You fell into the void. Watch for missing floor tiles!")
 
 	move_finished.emit()
+
+
+func _start_move_tween(target_pos: Vector2, duration: float) -> void:
+	current_tween = create_tween()
+	current_tween.tween_property(self, "position", target_pos, duration)
+	_move_duration = duration
+	_move_start_msec = Time.get_ticks_msec()
+	_active_tween_is_fall = false
+
+
+func _start_fall_tween(duration: float) -> void:
+	current_tween = create_tween()
+	current_tween.set_parallel(true)
+	current_tween.tween_property(self, "modulate:a", 0.0, duration)
+	current_tween.tween_property(self, "position:y", position.y + 80.0, duration)
+	_active_tween_duration = duration
+	_active_tween_start_msec = Time.get_ticks_msec()
+	_active_tween_is_fall = true
+
+
+func _wait_seconds(seconds: float) -> void:
+	if seconds <= 0.0:
+		return
+	await get_tree().create_timer(seconds).timeout
+
+
+func _active_tween_remaining() -> float:
+	if _active_tween_duration <= 0.0:
+		return 0.0
+	var elapsed := float(Time.get_ticks_msec() - _active_tween_start_msec) / 1000.0
+	return maxf(0.0, _active_tween_duration - elapsed)
+
+
+func _move_elapsed() -> float:
+	return float(Time.get_ticks_msec() - _move_start_msec) / 1000.0
+
+
+func _move_remaining() -> float:
+	return maxf(0.0, _move_duration - _move_elapsed())
+
+
+func _move_progress() -> float:
+	if _move_duration <= 0.0:
+		return 1.0
+	return clampf(_move_elapsed() / _move_duration, 0.0, 1.0)
+
+
+func _retarget_active_tween(target_pos: Vector2) -> void:
+	var was_fall := _active_tween_is_fall
+
+	if current_tween != null and is_instance_valid(current_tween):
+		current_tween.kill()
+	current_tween = null
+
+	if was_fall:
+		# The void fall is terminal; snap to the cell and restart the fade/drop
+		# for whatever time remains so the lose sequence still plays.
+		var fall_remaining := _active_tween_remaining()
+		position = target_pos
+		_move_in_progress = false
+		if fall_remaining > 0.0:
+			_start_fall_tween(fall_remaining)
+		else:
+			_active_tween_duration = 0.0
+			_active_tween_is_fall = false
+		return
+
+	# Preserve the in-between position: interpolate between the rotated
+	# positions of the move's start and destination cells, then keep
+	# animating to the destination over the remaining move time.
+	var remaining := _move_remaining()
+	var progress := _move_progress()
+	var from_pos := target_pos
+	var world = _get_world()
+	if world != null and world.has_method("player_grid_position"):
+		from_pos = world.player_grid_position(_move_from_x, _move_from_y)
+	position = from_pos.lerp(target_pos, progress)
+
+	if remaining <= 0.0:
+		position = target_pos
+		_active_tween_is_fall = false
+		return
+
+	current_tween = create_tween()
+	current_tween.tween_property(self, "position", target_pos, remaining)
 
 
 func _trigger_lose(reason: String) -> void:

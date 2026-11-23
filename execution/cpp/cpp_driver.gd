@@ -2,6 +2,7 @@ extends RefCounted
 
 const BUILD_DIR := "user://build"
 const RUNTIME_CACHE_DIR := "user://build/runtime_cache"
+const COMPILE_TIMEOUT_MSEC := 300000
 const Paths = preload("res://execution/shared/paths.gd")
 
 var _commands = preload(Paths.ROBOT_COMMANDS).new()
@@ -9,6 +10,8 @@ var _runtime_assets = preload(Paths.RUNTIME_ASSETS).new()
 var _active_build_dir: String = ""
 var _prepare_error: String = ""
 var _prepare_reason: String = ""
+var _cancel_requested := false
+var _compiler_pid := -1
 static var _compiler: String = ""
 static var _compiler_probed := false
 static var _compiler_version_output: Array = []
@@ -76,6 +79,150 @@ func is_available() -> bool:
 	return is_platform_supported() and detect_compiler()
 
 
+# Asks the in-flight compiler (if any) to stop. Kills the whole process tree
+# because g++ spawns children (cc1plus, collect2, ld) that would otherwise be
+# orphaned and keep burning resources after the parent dies.
+func cancel_compile() -> void:
+	_cancel_requested = true
+	if _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
+		_kill_process_tree(_compiler_pid)
+
+
+func _cancelled_result() -> Dictionary:
+	return {"ok": false, "output": "Compilation cancelled.", "reason": "cancelled", "exe_path": ""}
+
+
+# Runs the compiler without blocking forever: polls the child PID so cancel()
+# can kill it, drains both output pipes so a chatty compiler can't deadlock on
+# a full pipe buffer, and returns the exit code (-1 on spawn failure/cancel).
+func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
+	if _cancel_requested:
+		return -1
+	var pipes := OS.execute_with_pipe(compiler, PackedStringArray(args), false)
+	if pipes.is_empty() or not pipes.has("pid"):
+		push_warning("Failed to spawn compiler: " + compiler)
+		return -2  # spawn failure, distinct from a real compile failure
+	_compiler_pid = int(pipes["pid"])
+	var stdio: FileAccess = pipes.get("stdio")
+	var stderr: FileAccess = pipes.get("stderr")
+
+	var start_msec := Time.get_ticks_msec()
+	var timed_out := false
+	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
+		if _cancel_requested:
+			_kill_process_tree(_compiler_pid)
+			break
+		if Time.get_ticks_msec() - start_msec > COMPILE_TIMEOUT_MSEC:
+			push_warning("Compiler timed out after %d ms; killing process tree" % COMPILE_TIMEOUT_MSEC)
+			_kill_process_tree(_compiler_pid)
+			timed_out = true
+			break
+		_drain_pipe(stdio, output)
+		_drain_pipe(stderr, output)
+		OS.delay_msec(50)
+
+	# Give a killed tree a moment to actually die, then reap the exit code.
+	var waited := 0
+	while _compiler_pid > 0 and OS.is_process_running(_compiler_pid) and waited < 2000:
+		OS.delay_msec(50)
+		waited += 50
+	if _compiler_pid > 0 and OS.is_process_running(_compiler_pid):
+		push_warning("Compiler process %d did not exit after kill" % _compiler_pid)
+
+	# Final drain runs once the process is gone; retry empty reads briefly so
+	# diagnostics after a blank line aren't dropped (pipe eof is unreliable).
+	_drain_pipe(stdio, output, true)
+	_drain_pipe(stderr, output, true)
+	if stdio != null:
+		stdio.close()
+	if stderr != null:
+		stderr.close()
+
+	var exit_code := -1
+	if _compiler_pid > 0:
+		# Always read the exit status, even for a cancelled/killed compile, so
+		# the child doesn't linger as an unreaped zombie. Cancelled compiles
+		# still report -1 to the caller.
+		var reaped := OS.get_process_exit_code(_compiler_pid)
+		if not _cancel_requested:
+			exit_code = reaped
+		if not OS.is_process_running(_compiler_pid):
+			_compiler_pid = -1
+		# If the process survived the kill, keep the PID so the state stays
+		# accurate; the push_warning above already flagged the orphan.
+	if timed_out and not _cancel_requested:
+		return -3  # timeout, distinct from cancel (-1) and spawn failure (-2)
+	return exit_code
+
+
+# `final` mode is used for the post-exit drain: an empty get_line() may mean
+# "no data yet" rather than a blank line, so retry a few times before giving
+# up. Mid-run polls break on the first empty read since the next tick retries.
+# Known trade-off: get_line() returns whatever bytes are available, so a very
+# long line without a newline can stall pipe polling until more data or a
+# newline arrives; cancel() killing the process from another thread is the
+# escape hatch.
+func _drain_pipe(file: FileAccess, output: Array, final: bool = false) -> void:
+	if file == null:
+		return
+	var empty_reads := 0
+	while not file.eof_reached():
+		var line := file.get_line()
+		if line == "":
+			if not final:
+				break
+			empty_reads += 1
+			if empty_reads > 5:
+				break
+			OS.delay_msec(20)
+			continue
+		empty_reads = 0
+		output.append(line)
+
+
+func _kill_process_tree(pid: int) -> void:
+	if pid <= 0:
+		return
+	if OS.get_name() == "Windows":
+		OS.execute("taskkill", ["/F", "/T", "/PID", str(pid)], [], true)
+		return
+	# Snapshot-and-kill descendants a few times: a child spawned between
+	# snapshots is caught on the next pass, all before the parent dies.
+	for _pass in range(3):
+		var children := _child_pids(pid)
+		if children.is_empty():
+			break
+		for child in children:
+			_kill_process_tree(child)
+	if OS.is_process_running(pid):
+		OS.kill(pid)
+
+
+func _child_pids(pid: int) -> Array[int]:
+	var children: Array[int] = []
+	var out: Array = []
+	# pgrep is procps-only; fall back to ps (POSIX) on minimal systems so
+	# compiler children don't get orphaned when pgrep is missing.
+	if OS.execute("pgrep", ["-P", str(pid)], out, true) != OK or out.is_empty():
+		out.clear()
+		if OS.execute("ps", ["-eo", "pid=,ppid="], out, true) != OK:
+			return children
+		for entry in out:
+			for line in str(entry).split("\n"):
+				var fields := line.split(" ", false)
+				if fields.size() >= 2 and fields[1].to_int() == pid and fields[0].is_valid_int():
+					children.append(int(fields[0]))
+		return children
+	# OS.execute returns all stdout as ONE array element with embedded
+	# newlines, so each entry must be split into lines before parsing.
+	for entry in out:
+		for line in str(entry).split("\n"):
+			var text := line.strip_edges()
+			if text.is_valid_int():
+				children.append(int(text))
+	return children
+
+
 func compile_program() -> Dictionary:
 	var output: Array = []
 	if not _prepare_error.is_empty():
@@ -119,6 +266,8 @@ func compile_program() -> Dictionary:
 	var cache := ConfigFile.new()
 	cache.load(cache_path)
 	var exe_hash := FileAccess.get_sha256(exe)
+	if _cancel_requested:
+		return _cancelled_result()
 	if cache.get_value("build", "key", "") == build_key and exe_hash != "" \
 			and cache.get_value("build", "exe_hash", "") == exe_hash:
 		return {"ok": true, "output": "", "exe_path": exe, "cached": true}
@@ -151,7 +300,17 @@ func compile_program() -> Dictionary:
 		var runtime_tmp := shared_runtime_object + ".tmp"
 		var runtime_args := args.duplicate()
 		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_tmp])
-		if OS.execute(compiler, runtime_args, output, true) != 0:
+		var runtime_code := _run_cancellable(compiler, runtime_args, output)
+		if _cancel_requested:
+			if FileAccess.file_exists(runtime_tmp):
+				DirAccess.remove_absolute(runtime_tmp)
+			return _cancelled_result()
+		if runtime_code == -2:
+			return {"ok": false, "output": "Failed to launch the C++ compiler.", "reason": "internal_error", "exe_path": ""}
+		if runtime_code == -3:
+			DirAccess.remove_absolute(runtime_tmp)
+			return {"ok": false, "output": "Compilation timed out.", "reason": "timeout", "exe_path": ""}
+		if runtime_code != 0:
 			DirAccess.remove_absolute(runtime_tmp)
 			return {"ok": false, "output": "\n".join(output), "reason": "runtime_error", "exe_path": ""}
 		runtime_object_hash = FileAccess.get_sha256(runtime_tmp)
@@ -193,28 +352,75 @@ func compile_program() -> Dictionary:
 		cache.set_value("runtime", "object_hash", runtime_object_hash)
 		cache.save(cache_path)
 
-	# Failed builds must not reuse an older successful executable.
+	# Failed builds must not reuse an older successful executable, but the
+	# previous exe is kept until the new one links successfully: compile to a
+	# temp file and publish via rename so a failed/cancelled recheck can't
+	# destroy the build the workstation may still run.
 	if cache.has_section("build"):
 		cache.erase_section("build")
 	cache.save(cache_path)
-	if FileAccess.file_exists(exe):
-		DirAccess.remove_absolute(exe)
-	args.append_array([student_cpp, runtime_object, "-o", exe])
+	var tmp_exe := exe + ".tmp"
+	args.append_array([student_cpp, runtime_object, "-o", tmp_exe])
 	args.append_array(link_flags)
 
 	# Discard runtime compile output so its warnings aren't misattributed to student code.
 	output.clear()
 
-	var exit_code := OS.execute(compiler, args, output, true)
+	var exit_code := _run_cancellable(compiler, args, output)
+	if _cancel_requested:
+		if FileAccess.file_exists(tmp_exe):
+			DirAccess.remove_absolute(tmp_exe)
+		return _cancelled_result()
 	var diagnostics := "\n".join(output)
 	if exit_code == 0:
+		# Publish via rename without ever leaving exe missing: move the old
+		# exe aside first (rename can't overwrite on Windows), then restore it
+		# if publishing the new build fails.
+		var old_exe := exe + ".old"
+		var moved_old := false
+		if FileAccess.file_exists(exe):
+			# Clear a stale .old left by a crash between the two renames —
+			# rename can't overwrite on Windows, so it would fail forever.
+			if FileAccess.file_exists(old_exe):
+				DirAccess.remove_absolute(old_exe)
+			moved_old = DirAccess.rename_absolute(exe, old_exe) == OK
+			if not moved_old:
+				if FileAccess.file_exists(tmp_exe):
+					DirAccess.remove_absolute(tmp_exe)
+				return {
+					"ok": false,
+					"output": "Previous executable could not be moved aside.",
+					"reason": "internal_error",
+					"exe_path": ""
+				}
+		if DirAccess.rename_absolute(tmp_exe, exe) != OK:
+			if moved_old and not FileAccess.file_exists(exe) \
+					and FileAccess.file_exists(old_exe):
+				DirAccess.rename_absolute(old_exe, exe)
+			if FileAccess.file_exists(tmp_exe):
+				DirAccess.remove_absolute(tmp_exe)
+			return {
+				"ok": false,
+				"output": "Compiled executable could not be published.",
+				"reason": "internal_error",
+				"exe_path": ""
+			}
+		if moved_old and FileAccess.file_exists(old_exe):
+			DirAccess.remove_absolute(old_exe)
 		cache.set_value("build", "key", build_key)
 		cache.set_value("build", "exe_hash", FileAccess.get_sha256(exe))
+	elif FileAccess.file_exists(tmp_exe):
+		DirAccess.remove_absolute(tmp_exe)
 	cache.save(cache_path)
+	var failure_output := diagnostics
+	if exit_code == -2:
+		failure_output = "Failed to launch the C++ compiler."
+	elif exit_code == -3:
+		failure_output = "Compilation timed out."
 	return {
 		"ok": exit_code == 0,
-		"output": diagnostics,
-		"reason": "" if exit_code == 0 else "compile_error",
+		"output": failure_output,
+		"reason": "" if exit_code == 0 else ("timeout" if exit_code == -3 else ("internal_error" if exit_code == -2 else "compile_error")),
 		"cached": false,
 		"exe_path": exe if exit_code == 0 else ""
 	}

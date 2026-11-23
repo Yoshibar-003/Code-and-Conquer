@@ -8,6 +8,7 @@ var campaign_hint: Label
 var campaign_panel: VBoxContainer
 var campaign_next_button: Button
 var campaign_hint_button: Button
+const CAMPAIGN_PANEL_COMPASS_CLEARANCE := 140
 var sandbox_worker = preload("res://execution/shared/sandbox_worker_client.gd").new()
 var runtime_assets = preload(Paths.RUNTIME_ASSETS).new()
 # === UI references ===
@@ -134,10 +135,11 @@ signal _resume
 var current_line_offset: int = 0
 var _is_handling_lose: bool = false
 var _highlighted_line: int = -1
+var _controls_locked: bool = false
 
 var global_level_name := ""
 var exec_speed: float = 0.5
-var _run_outcome: String = "incomplete"  # "win" | "lose" | "incomplete" | "move_limit" | "cmd_limit" | "time_limit" | "done"
+var _run_outcome: String = "incomplete"  # "incomplete" = no outcome yet | "win" | "lose" | "incomplete_lose" | "move_limit" | "cmd_limit" | "time_limit" | "done" | "error"
 var _run_had_error: bool = false  # set when the subprocess emits [ERROR]
 # === execution limits ===
 # Default limits
@@ -158,7 +160,9 @@ var checked_code := ""
 var has_checked_code := false
 var checked_cpp_executable := ""
 var checked_cpp_line_offset := 0
-var _compile_thread: Thread
+var _compile_task_id := -1
+var _compile_worker := preload("res://execution/cpp/cpp_compile_worker.gd").new()
+var _auto_accept_quit_before := true
 
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
 const OBJECT_MUTATING_COMMANDS := ["PICK_OBJECT", "PUT_OBJECT"]
@@ -194,8 +198,9 @@ var custom_levels_list: VBoxContainer
 func _ready() -> void:
 	# Kill any subprocess left over from a previous session that was force-closed.
 	# auto_accept_quit disabled so _notification can clean up before Godot exits.
-	# Deferred so the blocking OS.execute doesn't delay scene setup.
+	_auto_accept_quit_before = get_tree().auto_accept_quit
 	get_tree().set_auto_accept_quit(false)		# required for _notification to intercept window close
+	# Deferred so the blocking OS.execute doesn't delay scene setup.
 	call_deferred("_kill_stale_student_program")
 
 	_set_status("Ready", "")
@@ -344,17 +349,6 @@ func _setup_level_windows() -> void:
 	custom_levels_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(custom_levels_list)
 
-func _compile_cpp_in_background(source: String, build_dir: String) -> Dictionary:
-	var background_compiler = preload(Paths.CPP_DRIVER).new()
-	if not background_compiler.prepare_build_files(source, build_dir):
-		return {
-			"ok": false,
-			"output": background_compiler.get_prepare_error(),
-			"reason": background_compiler.get_prepare_reason(),
-			"exe_path": ""
-		}
-	return background_compiler.compile_program()
-
 
 func _prune_stale_cpp_build_dirs(root: String, keep_hash: String) -> void:
 	var dir := DirAccess.open(root)
@@ -400,17 +394,28 @@ func _remove_dir_recursive(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 func _finish_cpp_check(source: String, line_offset: int) -> void:
-	while _compile_thread.is_alive():
+	while _compile_task_id >= 0 \
+			and not WorkerThreadPool.is_task_completed(_compile_task_id) \
+			and is_inside_tree():
 		await get_tree().process_frame
 
-	var build: Dictionary = _compile_thread.wait_to_finish()
-	_compile_thread = null
+	# The workstation is being torn down (menu/quit). The pool task is
+	# detached from this node and its result is simply discarded.
+	if _compile_task_id < 0 or not is_inside_tree():
+		return
 
-	check_button.disabled = false
-	editor.editable = true
-	language_selector.disabled = false
+	WorkerThreadPool.wait_for_task_completion(_compile_task_id)
+	# Do NOT clear _compile_worker.result here: a second worker deduped onto
+	# this one polls result after _finished flips, and clearing it would make
+	# it fall through to a redundant fresh compile.
+	var build: Dictionary = _compile_worker.result
+	_compile_task_id = -1
+	_refresh_program_controls()
 
-	if not build.ok:
+	editor.editable = not _controls_locked
+	language_selector.disabled = _controls_locked
+
+	if not build.get("ok", false):
 		var raw_output := str(build.get("output", ""))
 		match str(build.get("reason", "")):
 			"no_compiler":
@@ -425,30 +430,45 @@ func _finish_cpp_check(source: String, line_offset: int) -> void:
 			"runtime_error":
 				log_error(raw_output)
 				_set_status("C++ runtime build failed", "error")
+			"timeout":
+				log_error(raw_output)
+				_set_status("Compile timed out", "error")
+			"cancelled":
+				_set_status("Compile cancelled.", "")
 			_:
 				log_error(compiler.remap_diagnostics(raw_output, line_offset))
 				_set_status("Compile failed", "error")
+		# A failed re-check keeps the previous checked build valid, so restore
+		# Run/Step from has_checked_code — but never behind a locked UI
+		# (e.g. Leave Level? still open) or while another compile is running.
+		run_button.disabled = _controls_locked or not has_checked_code
+		step_button.disabled = _controls_locked or not has_checked_code
 		return
 
-	var same_as_last_check := not checked_code.is_empty() and source == checked_code
+	# The code editor was locked during the compile, but guard anyway:
+	# if text no longer matches what was compiled, this build is stale.
+	if editor.text != source:
+		_set_status("Code changed during compile — run Check Code again.", "error")
+		return
+
 	checked_code = source
 	has_checked_code = true
 	checked_cpp_executable = str(build.get("exe_path", ""))
 	checked_cpp_line_offset = line_offset
-	run_button.disabled = false
+	run_button.disabled = _controls_locked or not has_checked_code
+	step_button.disabled = _controls_locked or not has_checked_code
 	_set_status("C++ compiled successfully — ready to run.", "")
-	if build.get("cached", false):
-		log_line("C++ code unchanged — previous build reused." if same_as_last_check
-			else "C++ compilation passed (reused an earlier build of this code).")
-	else:
-		log_line("C++ compilation passed.")
+	log_line("C++ build reused — identical source compiled previously." if build.get("cached", false) else "C++ compilation passed.")
 
 func _setup_campaign_ui() -> void:
 	campaign_panel = VBoxContainer.new()
 	campaign_panel.add_theme_constant_override("separation", 6)
+	var panel_margin := MarginContainer.new()
+	panel_margin.add_theme_constant_override("margin_right", CAMPAIGN_PANEL_COMPASS_CLEARANCE)
 	var column := $RootMargin/MainColumn
-	column.add_child(campaign_panel)
-	column.move_child(campaign_panel, 1)
+	column.add_child(panel_margin)
+	column.move_child(panel_margin, 1)
+	panel_margin.add_child(campaign_panel)
 	campaign_instructions = Label.new()
 	campaign_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	campaign_instructions.add_theme_font_size_override("font_size", 20)
@@ -474,6 +494,18 @@ func _setup_campaign_ui() -> void:
 	campaign_next_button = Button.new()
 	campaign_next_button.text = "Next Level"
 	campaign_next_button.custom_minimum_size.y = 36
+	campaign_next_button.add_theme_font_size_override("font_size", 15)
+	campaign_next_button.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	var next_style := StyleBoxFlat.new()
+	next_style.bg_color = Color(0.35, 0.24, 0.07, 1)
+	next_style.border_color = Color(0.95, 0.75, 0.3, 1)
+	next_style.set_border_width_all(1)
+	next_style.set_corner_radius_all(6)
+	next_style.content_margin_left = 20
+	next_style.content_margin_right = 20
+	next_style.content_margin_top = 8
+	next_style.content_margin_bottom = 8
+	campaign_next_button.add_theme_stylebox_override("normal", next_style)
 	campaign_next_button.pressed.connect(_on_win_next)
 	var buttons := $WinOverlay/WinCard/WinContent/WinButtons
 	buttons.add_child(campaign_next_button)
@@ -601,8 +633,10 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	game_instance = new_game_instance
 	game_subviewport.add_child(game_instance)
 
+	_is_handling_lose = false
 	_run_outcome = "incomplete"
 	_run_had_error = false
+	_refresh_program_controls()
 
 	if preserve_camera and not saved_camera_state.is_empty() \
 			and game_instance.has_method("set_pending_camera_restore"):
@@ -647,6 +681,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 	flat_grid_node.visible = _is_2d_mode
 	if _is_2d_mode:
 		game_instance.camera.enabled = false
+		game_instance.visible = false
 		flat_grid_node.activate()
 	else:
 		game_instance.camera.enabled = true
@@ -757,6 +792,8 @@ func _on_language_changed(index: int) -> void:
 	
 	_load_level_scene(false, true)
 	_restore_level_code(_loaded_level_path)
+	run_button.disabled = not has_checked_code
+	step_button.disabled = not has_checked_code
 
 
 # === syntax highlighting ===
@@ -841,6 +878,9 @@ func _setup_python_highlighting() -> void:
 # === button handlers ===
 
 func _on_run_button_pressed() -> void:
+	if _compile_task_id >= 0:
+		return
+
 	if _ipc_active:
 		if _paused:
 			if _step_index < _cmd_history.size():
@@ -854,6 +894,10 @@ func _on_run_button_pressed() -> void:
 			_paused = true
 			run_button.text = "▶ Resume"
 			_set_status("Paused", "")
+		return
+
+	if _is_program_finished():
+		_set_status("Reset the level before running.", "error")
 		return
 
 	if not has_checked_code:
@@ -902,6 +946,9 @@ func _resume_after_step_back(run_id: int) -> void:
 
 
 func _on_step_button_pressed() -> void:
+	if _compile_task_id >= 0:
+		return
+
 	# Running: pause first
 	if _ipc_active and not _paused:
 		_paused = true
@@ -920,6 +967,10 @@ func _on_step_button_pressed() -> void:
 		return
 
 	# start a fresh run, but begin paused so the first command is a single step
+	if _is_program_finished():
+		_set_status("Reset the level before running.", "error")
+		return
+
 	if not has_checked_code:
 		_set_status("Check your code before running.", "error")
 		return
@@ -1040,16 +1091,18 @@ func _on_reset_button_pressed() -> void:
 		_set_controls_disabled(false)
 
 		run_button.text = "▶ Run"
-		run_button.disabled = not has_checked_code
-		step_button.disabled = false
+		run_button.disabled = not has_checked_code or _is_execution_busy(false)
+		step_button.disabled = not has_checked_code or _is_execution_busy(false)
 		reset_button.disabled = false
 		prev_button.disabled = true
+		_refresh_program_controls()
 
 		_set_status("Reset failed. Level could not be reloaded.", "error")
 		log_error("Reset failed: could not reload the level.")
 		return
 
 	# Reset succeeded. Clear execution history.
+	_set_controls_disabled(false)
 	_clear_editor_highlights()
 	_cmd_history.clear()
 	_step_index = 0
@@ -1057,8 +1110,8 @@ func _on_reset_button_pressed() -> void:
 	_in_replay = false
 
 	run_button.text = "▶ Run"
-	run_button.disabled = false
-	step_button.disabled = false
+	run_button.disabled = not has_checked_code or _is_execution_busy(false)
+	step_button.disabled = not has_checked_code or _is_execution_busy(false)
 	reset_button.disabled = false
 	rotate_left_btn.disabled = false
 	rotate_right_btn.disabled = false
@@ -1108,22 +1161,121 @@ const LOSE_MESSAGES := [
 #	"Splat. Your player is now wall decor.",     # walking into a wall
 ]
 
-func _set_controls_disabled(disabled: bool) -> void:
-	run_button.disabled = disabled
-	prev_button.disabled = disabled
-	step_button.disabled = disabled
-	reset_button.disabled = disabled
-	language_selector.disabled = disabled
-	editor.editable = not disabled
-	rotate_left_btn.disabled = disabled
-	rotate_right_btn.disabled = disabled
-	settings_button.disabled = disabled
-	library_button.disabled = disabled
-	level_button.disabled = _is_execution_busy()
+func _is_program_finished() -> bool:
+	if _is_execution_busy(false):
+		return false
+	return _has_terminal_outcome()
 
+
+# True once any win/lose/done/error outcome has been reached, regardless of
+# whether execution is still busy. Used to make terminal handlers idempotent
+# so a stray late signal cannot show a second result popup.
+func _has_terminal_outcome() -> bool:
+	# _run_had_error counts immediately: [ERROR] is already a terminal state
+	# (the IPC loop reports "Error" and locks controls), so a win/lose signal
+	# arriving while the subprocess winds down must not replace it.
+	return _is_handling_lose or _run_had_error or _run_outcome != "incomplete"
+
+
+func _refresh_program_controls() -> void:
+	var finished := _is_program_finished()
+	var busy := _is_execution_busy(false)
+
+	check_button.disabled = _controls_locked or finished or busy or _compile_task_id >= 0
+	level_button.disabled = _controls_locked or finished or busy or _compile_task_id >= 0
+
+	# A compile in flight must not allow Step to launch a run of previously
+	# checked code concurrently with it.
+	if _compile_task_id >= 0:
+		step_button.disabled = true
+		prev_button.disabled = true
+
+	if finished:
+		run_button.disabled = true
+		step_button.disabled = true
+		prev_button.disabled = true
+
+
+func _restore_workspace_controls() -> void:
+	var busy := _is_execution_busy(false)
+	var ipc_running := _ipc_active
+
+	# A compile in flight must keep the code editor and language selector locked
+	# so Stay can't let the user edit code that _finish_cpp_check would then mark
+	# as checked against a stale build.
+	editor.editable = _compile_task_id < 0
+	language_selector.disabled = _compile_task_id >= 0
+	settings_button.disabled = false
+	library_button.disabled = false
+	reset_button.disabled = false
+	rotate_left_btn.disabled = false
+	rotate_right_btn.disabled = false
+	rotate_left_btn.visible = not _is_2d_mode
+	rotate_right_btn.visible = not _is_2d_mode
+
+	if busy and ipc_running:
+		run_button.disabled = false
+		run_button.text = "▶ Resume" if _paused else "❚❚ Pause"
+		step_button.disabled = not _paused
+		prev_button.disabled = not (_paused and _step_index > 0)
+	elif busy or _is_program_finished():
+		run_button.text = "▶ Run"
+		run_button.disabled = true
+		step_button.disabled = true
+		prev_button.disabled = true
+	else:
+		run_button.text = "▶ Run"
+		run_button.disabled = not has_checked_code
+		step_button.disabled = not has_checked_code
+		prev_button.disabled = true
+
+	_refresh_program_controls()
+
+
+# Hides every transient popup/window so a result popup is the only thing
+# visible. Result overlays (win/lose/done) are handled separately by
+# _show_result_overlay.
+func _hide_transient_popups() -> void:
+	settings_overlay.hide()
+	library_overlay.hide()
+	menu_confirm_overlay.hide()
+	report_folder_dialog.hide()
+	if level_type_window != null:
+		level_type_window.hide()
+	if custom_levels_window != null:
+		custom_levels_window.hide()
+	if campaign_menu != null:
+		campaign_menu.hide()
+
+
+# Shows a result popup and evicts everything else: other result overlays and
+# all transient popups. Result popups take priority over anything previously
+# open (e.g. "Leave Level?" or Settings).
+func _show_result_overlay(overlay: Control) -> void:
+	win_overlay.hide()
+	lose_overlay.hide()
+	done_overlay.hide()
+	_hide_transient_popups()
+	overlay.show()
+
+
+func _set_controls_disabled(disabled: bool) -> void:
+	_controls_locked = disabled
 	if disabled:
-		settings_overlay.hide()
-		library_overlay.hide()
+		run_button.disabled = true
+		prev_button.disabled = true
+		step_button.disabled = true
+		reset_button.disabled = true
+		language_selector.disabled = true
+		editor.editable = false
+		rotate_left_btn.disabled = true
+		rotate_right_btn.disabled = true
+		settings_button.disabled = true
+		library_button.disabled = true
+		_refresh_program_controls()
+		_hide_transient_popups()
+	else:
+		_restore_workspace_controls()
 
 
 # TODO: Pick a message for the *specific* lose condition
@@ -1132,7 +1284,7 @@ func _get_funny_lose_message() -> String:
 
 
 func _trigger_move_limit_lose() -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	
 	_is_handling_lose = true
@@ -1146,12 +1298,12 @@ func _trigger_move_limit_lose() -> void:
 	_set_status("You lost", "error")
 	
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _trigger_cmd_limit_lose() -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	
 	_is_handling_lose = true
@@ -1165,12 +1317,12 @@ func _trigger_cmd_limit_lose() -> void:
 	_set_status("You lost", "error")
 	
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _trigger_time_limit_lose() -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	
 	_is_handling_lose = true
@@ -1183,7 +1335,7 @@ func _trigger_time_limit_lose() -> void:
 	_set_status("You lost", "error")
 	
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
@@ -1191,10 +1343,10 @@ func _trigger_time_limit_lose() -> void:
 #   - Player code finished without winning or crashing
 #   - player landed on the goal tile but objectives weren't satisfied
 func _trigger_incomplete_lose(reason: String) -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	_is_handling_lose = true
-	_run_outcome = "incomplete"
+	_run_outcome = "incomplete_lose"
 	_refresh_level_limits()
 	_stop_execution()
 
@@ -1204,12 +1356,12 @@ func _trigger_incomplete_lose(reason: String) -> void:
 	_set_status("You lost", "error")
 
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _on_player_lose(reason: String) -> void:
-	if _is_handling_lose:
+	if _has_terminal_outcome():
 		return
 	_is_handling_lose = true
 	_run_outcome = "lose"
@@ -1222,12 +1374,12 @@ func _on_player_lose(reason: String) -> void:
 	_set_status("You lost", "error")
 
 	lose_message.text = _get_funny_lose_message()
-	lose_overlay.visible = true
+	_show_result_overlay(lose_overlay)
 	_set_controls_disabled(true)
 
 
 func _on_level_complete() -> void:
-	if _is_handling_lose or _run_outcome == "win":
+	if _has_terminal_outcome():
 		return
 	$WinSound.play()
 	_run_outcome = "win"
@@ -1248,7 +1400,7 @@ func _on_level_complete() -> void:
 	log_success("Your robot reached the goal!")
 	_set_status("Level Complete!", "ok")
 
-	win_overlay.visible = true
+	_show_result_overlay(win_overlay)
 	_set_controls_disabled(true)
 
 
@@ -1284,7 +1436,7 @@ func _on_win_next() -> void:
 	_switch_level()
 	if _loaded_level_path == next_path:
 		run_button.text = "▶ Run"
-		run_button.disabled = false
+		run_button.disabled = not has_checked_code
 
 	# Restore normal victory text for future levels.
 	$WinOverlay/WinCard/WinContent/WinTitle.text = "Level Complete!"
@@ -1292,6 +1444,7 @@ func _on_win_next() -> void:
 
 
 func _on_go_to_menu() -> void:
+	_stop_execution()
 	get_tree().change_scene_to_file("res://main_menu/scenes/main_menu.tscn")
 
 
@@ -1477,8 +1630,6 @@ func _run_pipeline() -> void:
 	reset_button.disabled = false
 	run_button.disabled = true
 	step_button.disabled = true
-	rotate_left_btn.disabled = true
-	rotate_right_btn.disabled = true
 
 	_set_status("Compiling...", "")
 	output_box.clear()
@@ -1488,8 +1639,10 @@ func _run_pipeline() -> void:
 	_moves_used_count = 0
 	_in_replay = false
 	_refresh_level_limits()
+	_is_handling_lose = false
 	_run_outcome = "incomplete"
 	_run_had_error = false
+	_refresh_program_controls()
 	await get_tree().process_frame
 	if _run_id != run_id:
 		return
@@ -1693,6 +1846,7 @@ func _run_pipeline() -> void:
 			return
 		log_error("Subprocess did not connect within 5 seconds.")
 		_set_status("Timeout", "error")
+		_run_outcome = "error"
 		_stop_execution()
 		_re_enable_buttons()
 		return
@@ -1829,10 +1983,11 @@ func _run_ipc_loop(run_id: int) -> void:
 				_set_status("Error", "error")
 			else:
 				_set_status("Done", "ok")
+			_refresh_program_controls()
 
 
 func _on_execution_done() -> void:
-	if _is_handling_lose or _run_outcome == "done":
+	if _has_terminal_outcome():
 		return
 	_run_outcome = "done"
 	_stop_execution()
@@ -1840,7 +1995,7 @@ func _on_execution_done() -> void:
 	run_button.disabled = true
 	step_button.disabled = true
 	_set_status("Done", "ok")
-	done_overlay.visible = true
+	_show_result_overlay(done_overlay)
 	_set_controls_disabled(true)
 
 
@@ -1859,9 +2014,21 @@ func _on_done_retry() -> void:
 	_on_reset_button_pressed()
 
 
+func _exit_tree() -> void:
+	_compile_worker.cancel()
+	_compile_task_id = -1
+	_stop_execution()
+	# Restore the SceneTree-wide quit flag this scene disabled in _ready so the
+	# main menu's window-close button works again.
+	var tree := get_tree()
+	if tree != null:
+		tree.set_auto_accept_quit(_auto_accept_quit_before)
+
+
 # Intercepts window close so the subprocess is killed before Godot exits
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		CppCompileWorker.cancel_all()
 		_stop_execution()
 		get_tree().quit()
 
@@ -1895,6 +2062,7 @@ func _execute_cmd(cmd: String, src_line: int) -> void:
 				# later commands execute before movement or loss handling ends.
 				log_error("Movement did not complete; stopping execution.")
 				_set_status("Execution stopped", "error")
+				_run_outcome = "error"
 				_stop_execution()
 				_re_enable_buttons()
 				return
@@ -2017,6 +2185,7 @@ func _re_enable_buttons() -> void:
 	reset_button.disabled = false
 	rotate_left_btn.visible = not _is_2d_mode
 	rotate_right_btn.visible = not _is_2d_mode
+	_refresh_program_controls()
 
 
 func _on_grid_2d_button_pressed() -> void:
@@ -2069,20 +2238,24 @@ func _on_report_folder_selected(folder: String) -> void:
 
 	# capture screenshot (switch to 2D view momentarily if needed)
 	var was_2d := _is_2d_mode
-	if not was_2d and flat_grid_node != null:
-		game_instance.visible = false
-		game_instance.camera.enabled = false
-		flat_grid_node.visible = true
-		flat_grid_node.activate()
+	var shot_game := game_instance
+	var shot_flat := flat_grid_node
+	if not was_2d and shot_flat != null:
+		shot_game.visible = false
+		shot_game.camera.enabled = false
+		shot_flat.visible = true
+		shot_flat.activate()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var screenshot := game_subviewport.get_texture().get_image()
-	if not was_2d and flat_grid_node != null:
-		flat_grid_node.deactivate()
-		flat_grid_node.visible = false
-		game_instance.visible = true
-		game_instance.camera.enabled = true
-		game_instance.camera.make_current()
+	if not was_2d and shot_flat != null and not _is_2d_mode:
+		if is_instance_valid(shot_flat):
+			shot_flat.deactivate()
+			shot_flat.visible = false
+		if is_instance_valid(shot_game):
+			shot_game.visible = true
+			shot_game.camera.enabled = true
+			shot_game.camera.make_current()
 
 	var png_path := dir_path.path_join("%s_screenshot.png" % level_name)
 	screenshot.save_png(png_path)
@@ -2122,6 +2295,8 @@ func r_rotate_button_up() -> void:
 # toggle library_overlay between visible and invisible when library_button is pressed
 func _on_library_button_pressed() -> void:
 	library_overlay.visible = not library_overlay.visible
+	if library_overlay.visible:
+		settings_overlay.hide()
 
 # switches overlays invisible when clicking outside them
 func _input(event) -> void:
@@ -2261,7 +2436,7 @@ func _run_outcome_marker() -> String:
 	match _run_outcome:
 		"win":
 			return "!"
-		"lose", "incomplete":
+		"lose", "incomplete", "incomplete_lose":
 			return "?"
 		"done":
 			return "."
@@ -2392,8 +2567,14 @@ func _on_editor_text_changed() -> void:
 		_highlighted_line = -1
 
 func _on_check_button_pressed() -> void:
-	if _ipc_active:
+	if _compile_task_id >= 0:
+		return
+	if _is_execution_busy(false):
 		_set_status("Stop the current program before checking code.", "error")
+		return
+
+	if _is_program_finished():
+		_set_status("Reset the level before checking code.", "error")
 		return
 
 	var source := editor.text
@@ -2432,18 +2613,18 @@ func _on_check_button_pressed() -> void:
 		return
 
 	# Probe the compiler on the main thread so the background compile only reads the cached result.
-	if _compile_thread != null:
-		return
-
 	if compiler.is_platform_supported() and not compiler.detect_compiler():
 		log_error("A C++ compiler was not found. Please install a C++ compiler first, then restart the game.")
 		_set_status("C++ Compiler unavailable", "error")
 		return
 
 	var generated: Dictionary = generator.generate(source)
-	# Key the build dir by source content so concurrent instances can't share artifacts.
+	# Key the build dir by source content + process id: workers within this
+	# process still dedupe onto the same dir, but a second game instance can't
+	# race this process on the shared artifacts inside it.
 	var check_build_root := ProjectSettings.globalize_path("user://checked_build")
-	var check_build_dir := check_build_root.path_join(str(generated.generated_source).sha256_text())
+	var check_build_dir := check_build_root.path_join(
+		str(generated.generated_source).sha256_text() + "_" + str(OS.get_process_id()))
 	_prune_stale_cpp_build_dirs(check_build_root, check_build_dir.get_file())
 
 	check_button.disabled = true
@@ -2452,24 +2633,22 @@ func _on_check_button_pressed() -> void:
 	language_selector.disabled = true
 	_set_status("Compiling C++...", "")
 
-	_compile_thread = Thread.new()
-
-	var thread_error := _compile_thread.start(
-		_compile_cpp_in_background.bind(
-			generated.generated_source,
-			check_build_dir
-		)
+	# Fresh worker per check so result/_finished/_cancel_requested can't leak
+	# stale state from a previous compile into this one.
+	_compile_worker = preload("res://execution/cpp/cpp_compile_worker.gd").new()
+	_compile_task_id = WorkerThreadPool.add_task(
+		_compile_worker.run.bind(generated.generated_source, check_build_dir),
+		false,
+		"C++ compile check"
 	)
 
-	if thread_error != OK:
-		_compile_thread = null
-		check_button.disabled = false
-		editor.editable = true
-		language_selector.disabled = false
-		log_error("Could not start the C++ compiler thread.")
+	if _compile_task_id < 0:
+		_restore_workspace_controls()
+		log_error("Could not start the C++ compiler task.")
 		_set_status("Compile failed", "error")
 		return
 
+	_refresh_program_controls()
 	await _finish_cpp_check(source, generated.line_offset)
 
 
@@ -2555,6 +2734,10 @@ func _on_campaign_level_selected(path: String) -> void:
 	_switch_level()
 
 func _on_level_button_pressed() -> void:
+	if _is_program_finished():
+		_set_status("Reset the level before switching levels.", "error")
+		return
+
 	if _is_execution_busy():
 		_set_status("Stop the current program before switching levels.", "error")
 		return
@@ -2602,7 +2785,7 @@ func _switch_level() -> void:
 
 	print("Selected level path: ", new_path)
 
-	var loaded: bool = _load_level_scene(true, false)
+	var loaded: bool = _load_level_scene(false, false)
 
 	if not loaded:
 		SelectedLevel.path = _loaded_level_path
@@ -2631,35 +2814,35 @@ func _switch_level() -> void:
 	done_overlay.hide()
 	campaign_next_button.hide()
 
-	# Restore workstation controls.
-	_set_controls_disabled(false)
-	run_button.text = "▶ Run"
-	run_button.disabled = true
-	prev_button.disabled = true
-
 	# Previously checked code must not carry into a new level.
 	has_checked_code = false
 	checked_code = ""
 	checked_cpp_executable = ""
 
+	# Restore workstation controls.
+	_set_controls_disabled(false)
+
 	_set_status("Ready", "")
 	editor.grab_focus()
 
 
-func _is_execution_busy() -> bool:
+func _is_execution_busy(verbose: bool = true) -> bool:
 	var busy: bool = (
 		_run_pending
 		or _ipc_active
 		or _ipc_loop_running
 		or _subprocess_pid != -1
+		or _compile_task_id >= 0
 	)
 
-	print(
-		"Execution busy: ", busy,
-		" | Pending: ", _run_pending,
-		" | IPC: ", _ipc_active,
-		" | PID: ", _subprocess_pid
-	)
+	if verbose:
+		print(
+			"Execution busy: ", busy,
+			" | Pending: ", _run_pending,
+			" | IPC: ", _ipc_active,
+			" | PID: ", _subprocess_pid,
+			" | Compile: ", _compile_task_id
+		)
 
 	return busy
 
