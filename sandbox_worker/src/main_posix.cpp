@@ -355,7 +355,9 @@ std::string macos_sandbox_profile(const fs::path& run_directory, const fs::path&
 
     std::ostringstream profile;
     profile << "(version 1)\n"
-            << "(deny default)\n\n"
+            << "(deny default)\n";
+    // The macOS dynamic loader opens the root directory during startup.
+    profile << "(allow file-read-data (literal \"/\"))\n\n"
             << "(allow process-exec (literal \"" << executable_path << "\"))\n";
     if (!canonical_executable_path.empty() && canonical_executable_path != executable_path) {
         profile << "(allow process-exec (literal \"" << canonical_executable_path << "\"))\n";
@@ -610,7 +612,7 @@ int run_student(bool is_python, const std::string& run_id, const std::string& cl
         std::error_code permission_error;
         fs::permissions(
             executable,
-            fs::perms::owner_exe | fs::perms::group_exe | fs::perms::others_exe,
+            fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
             fs::perm_options::add,
             permission_error
         );
