@@ -97,6 +97,10 @@ func _cancelled_result() -> Dictionary:
 func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 	if _cancel_requested:
 		return -1
+	
+	print("C++ COMPILER: ", compiler)
+	print("C++ ARGUMENTS: ", JSON.stringify(args))
+
 	var pipes := OS.execute_with_pipe(compiler, PackedStringArray(args), false)
 	if pipes.is_empty() or not pipes.has("pid"):
 		push_warning("Failed to spawn compiler: " + compiler)
@@ -150,7 +154,10 @@ func _run_cancellable(compiler: String, args: Array, output: Array) -> int:
 		# If the process survived the kill, keep the PID so the state stays
 		# accurate; the push_warning above already flagged the orphan.
 	if timed_out and not _cancel_requested:
-		return -3  # timeout, distinct from cancel (-1) and spawn failure (-2)
+		print("C++ COMPILER TIMED OUT")
+		return -3
+
+	print("C++ COMPILER EXIT CODE: ", exit_code)
 	return exit_code
 
 
@@ -253,6 +260,13 @@ func compile_program() -> Dictionary:
 	var exe := _get_exe_path()
 
 	var args := ["-std=c++17", "-Wall", "-Wextra"]
+
+	if OS.get_name() == "Windows":
+		var normalized_compiler := compiler.replace("\\", "/")
+		if normalized_compiler.ends_with("/toolchains/gcc/bin/g++.exe"):
+			var gcc_root := compiler.get_base_dir().get_base_dir()
+			args.append("--sysroot=" + gcc_root)
+
 	if OS.get_name() == "Windows":
 		args.append("-static")
 	var runtime_key := (_runtime_assets.platform_tag() + compiler + str(_compiler_version_output) + str(args) + FileAccess.get_file_as_string(robot_cpp)
@@ -413,19 +427,46 @@ func remap_diagnostics(raw_text: String, line_offset: int) -> String:
 	return "\n".join(result)
 
 
+
 func _find_compiler() -> String:
 	if not _compiler.is_empty():
 		return _compiler
+
 	if _compiler_probed:
 		return ""
+
 	_compiler_probed = true
+
+	# Prefer the bundled Windows GCC compiler.
+	if OS.get_name() == "Windows":
+		var base_dir := ""
+		if OS.has_feature("editor"):
+			base_dir = ProjectSettings.globalize_path("res://")
+		else:
+			base_dir = OS.get_executable_path().get_base_dir()
+
+		var bundled_gcc := base_dir.path_join(
+			"toolchains/gcc/bin/g++.exe"
+		)
+
+		if FileAccess.file_exists(bundled_gcc):
+			var output: Array = []
+			if OS.execute(bundled_gcc, ["--version"], output, true) == 0:
+				_compiler_version_output = output
+				_compiler = bundled_gcc
+				print("Code and Conquer compiler: ", _compiler)
+				return _compiler
+
+	# Fall back to a compiler installed on the system.
 	for candidate in ["g++", "clang++", "c++"]:
 		var output: Array = []
 		if OS.execute(candidate, ["--version"], output, true) == 0:
 			_compiler_version_output = output
 			_compiler = candidate
 			return _compiler
+
 	return ""
+
 
 
 func _write_file(path: String, text: String) -> bool:
