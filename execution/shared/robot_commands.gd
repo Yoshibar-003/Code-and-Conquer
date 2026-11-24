@@ -272,6 +272,7 @@ func get_python_unix_bootstrap(socket_path: String) -> String:
 func get_python_runner(student_code: String) -> String:
 	var escaped := student_code.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 	return "\n".join([
+		"_robot_stdout = sys.stdout",
 		"_player_src = \"\"\"" + escaped + "\"\"\"",
 		"try:",
 		"    exec(compile(_player_src, '<player_code>', 'exec'))",
@@ -285,6 +286,10 @@ func get_python_runner(student_code: String) -> String:
 		"    else:",
 		"        _robot_send('[ERROR] ' + type(_e).__name__ + ': ' + str(_e))",
 		"finally:",
+		"    try:",
+		"        _robot_stdout.flush()",
+		"    except Exception:",
+		"        pass",
 		"    _robot_send('[DONE]')",
 		"    _sock.close()",
 	])

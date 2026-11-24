@@ -50,5 +50,11 @@ func run_tests() -> void:
 		check(bootstrap.contains("self._pending"), "Python bootstrap should buffer stdout until newline")
 		check(bootstrap.contains("sys._getframe(1).f_lineno"), "Python bootstrap should use fast caller line lookup")
 
+	var runner := commands.get_python_runner("print('done', end='')")
+	var flush_index := runner.find("_robot_stdout.flush()")
+	var done_index := runner.find("_robot_send('[DONE]')")
+	check(flush_index >= 0, "Python runner should flush buffered stdout")
+	check(done_index > flush_index, "Python runner should flush stdout before sending [DONE]")
+
 	print("PORTABILITY TESTS: %d failures" % failures)
 	quit(0 if failures == 0 else 1)
