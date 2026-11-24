@@ -22,6 +22,12 @@ var _move_from_x: int = 0
 var _move_from_y: int = 0
 var _move_duration: float = 0.0
 var _move_start_msec: int = 0
+# Pixel-space endpoints of the active move segment in the current rotation
+# frame. Used to recover true tween progress on rotation retarget; wall-clock
+# progress overstates it because the world rebuild stalls frames while
+# Time.get_ticks_msec() keeps running.
+var _move_pixel_from := Vector2.ZERO
+var _move_pixel_to := Vector2.ZERO
 
 func _ready() -> void:
 	pass
@@ -164,6 +170,12 @@ func move_forward(duration: float = 0.5) -> void:
 
 
 func _start_move_tween(target_pos: Vector2, duration: float) -> void:
+	var world = _get_world()
+	if world != null and world.has_method("player_grid_position"):
+		_move_pixel_from = world.player_grid_position(_move_from_x, _move_from_y)
+	else:
+		_move_pixel_from = position
+	_move_pixel_to = target_pos
 	current_tween = create_tween()
 	current_tween.tween_property(self, "position", target_pos, duration)
 	_move_duration = duration
@@ -205,7 +217,14 @@ func _move_remaining() -> float:
 func _move_progress() -> float:
 	if _move_duration <= 0.0:
 		return 1.0
-	return clampf(_move_elapsed() / _move_duration, 0.0, 1.0)
+	# Report visual progress along the pixel segment, not wall-clock elapsed:
+	# synchronous world rebuilds stall frames while the clock keeps running,
+	# so wall-clock progress would jump ahead of the tween's actual position.
+	var segment := _move_pixel_to - _move_pixel_from
+	var segment_len_sq := segment.length_squared()
+	if segment_len_sq <= 0.0:
+		return clampf(_move_elapsed() / _move_duration, 0.0, 1.0)
+	return clampf((position - _move_pixel_from).dot(segment) / segment_len_sq, 0.0, 1.0)
 
 
 func _retarget_active_tween(target_pos: Vector2) -> void:
@@ -231,6 +250,9 @@ func _retarget_active_tween(target_pos: Vector2) -> void:
 	# Preserve the in-between position: interpolate between the rotated
 	# positions of the move's start and destination cells, then keep
 	# animating to the destination over the remaining move time.
+	# Progress comes from the player's actual pixel position on the stored
+	# segment, not the wall clock; the synchronous world rebuild stalls
+	# frames, so _move_progress() would jump ahead of the visible tween.
 	var remaining := _move_remaining()
 	var progress := _move_progress()
 	var from_pos := target_pos
@@ -238,6 +260,8 @@ func _retarget_active_tween(target_pos: Vector2) -> void:
 	if world != null and world.has_method("player_grid_position"):
 		from_pos = world.player_grid_position(_move_from_x, _move_from_y)
 	position = from_pos.lerp(target_pos, progress)
+	_move_pixel_from = from_pos
+	_move_pixel_to = target_pos
 
 	if remaining <= 0.0:
 		position = target_pos
