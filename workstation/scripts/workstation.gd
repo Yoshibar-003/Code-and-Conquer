@@ -1570,7 +1570,7 @@ func _baseline_command_cost(cmd: String) -> float:
 	match cmd:
 		"MOVE":
 			return BASE_EXEC_SPEED
-		"TURN_LEFT", "TURN_RIGHT":
+		"TURN_LEFT":
 			return BASE_EXEC_SPEED * 0.2
 	return 0.0
 
@@ -2087,9 +2087,6 @@ func _execute_cmd(cmd: String, src_line: int) -> void:
 				return
 		"TURN_LEFT":
 			player_node.turn_left()
-			await get_tree().create_timer(exec_speed * 0.2).timeout
-		"TURN_RIGHT":
-			player_node.turn_right()
 			await get_tree().create_timer(exec_speed * 0.2).timeout
 		"PICK_OBJECT":
 			player_node.pick_object()

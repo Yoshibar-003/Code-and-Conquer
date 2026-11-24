@@ -1,8 +1,26 @@
 extends RefCounted
 
+# IPC protocol between the student program and Godot (relayed by the sandbox
+# worker; see execution/shared/ipc_server.gd for the worker-facing side).
+# Student -> Godot, one tag per line:
+#   [AUTH] <token>            one-time handshake token
+#   [CMD] <NAME> [LINE] <n>   robot command; <n> is the student's 1-indexed
+#                             source line, used for highlighting/step-back
+#   [QUERY] <NAME> [LINE] <n> sensor query
+#   [PRINT] <text>            student print() output
+#   [ERROR] <text>            unhandled student exception
+#   [DONE]                    student program finished
+# Godot -> student replies: "OK" acknowledges a [CMD]; "true"/"false" answers
+# a [QUERY]. ipc_server.gd also surfaces control lines ([CANCELLED],
+# [DISCONNECT], [AUTH_FAILED], [PROTOCOL_ERROR]) that never reach this parser.
+# COMMANDS and SENSORS below are the single source of truth for the robot API;
+# add new student-facing functions there only.
+
 # Add all new commands here — both C++ and Python update automatically
 
 # Command functions, alters player state
+# To whom it concerns: no turn_right command is intentional (there's no
+# turn_right command in Reeborg's World), only turn_left.
 const COMMANDS := [
 	{ "name": "move",        "cmd": "MOVE"        },
 	{ "name": "turn_left",   "cmd": "TURN_LEFT"   },
@@ -26,80 +44,6 @@ const SENSORS := [
 	{ "name": "is_facing_south", "query": "IS_FACING_SOUTH" },
 	{ "name": "is_facing_west", "query": "IS_FACING_WEST" },
 ]
-
-## Socket bootstrap + a synthesized 'robot' module containing all commands and sensors.
-func get_python_bootstrap(port: int, token: String) -> String:
-	var lines := [
-		"import socket as _socket, sys, traceback, types",
-		"",
-		"_sock = _socket.create_connection(('127.0.0.1', %d))" % port,
-		"_sock_file = _sock.makefile('rwb', buffering=1)",
-		"",
-		"def _robot_send(msg):",
-		"    # Cap wire size in BYTES, not characters: UTF-8 uses up to 4 bytes",
-		"    # per character and the worker's pipe read / IPC line limit are ~8KB.",
-		"    # Only free-text tails ([PRINT]/[ERROR]) can exceed this; protocol",
-		"    # fields like [CMD]/[QUERY]/[LINE] are always small and at the front.",
-		"    _data = (msg + '\\n').encode()",
-		"    if len(_data) > 8000:",
-		"        # decode('ignore') drops a partial UTF-8 sequence at the cut.",
-		"        msg = _data[:7997].decode('utf-8', 'ignore') + '...'",
-		"        _data = (msg + '\\n').encode()",
-		"    _sock_file.write(_data)",
-		"    _sock_file.flush()",
-		"",
-		"def _robot_recv():",
-		"    return _sock_file.readline().decode().strip()",
-		"",
-		"_robot_send('[AUTH] %s')" % token,
-		"",
-		"# Route student print() through the socket to the output panel",
-		"# print() calls write() once per argument, so buffer until newline.",
-		"class _SockStdout:",
-		"    def __init__(self):",
-		"        self._pending = ''",
-		"    def write(self, s):",
-		"        self._pending += s",
-		"        while '\\n' in self._pending:",
-		"            _line, self._pending = self._pending.split('\\n', 1)",
-		"            if _line:",
-		"                _robot_send('[PRINT] ' + _line.rstrip('\\r'))",
-		"    def flush(self):",
-		"        if self._pending:",
-		"            _robot_send('[PRINT] ' + self._pending)",
-		"            self._pending = ''",
-		"sys.stdout = _SockStdout()",
-		"",
-		"# Build the 'robot' module dynamically and register it so student code",
-		"_robot_mod = types.ModuleType('robot')",
-		"_robot_exports = []",
-		"",
-		"def _mk_cmd(_cmd):",
-		"    def _fn():",
-		"        # sys._getframe(1) is the caller's frame; f_lineno is the student's call site.",
-		"        _robot_send('[CMD] ' + _cmd + ' [LINE] ' + str(sys._getframe(1).f_lineno))",
-		"        _robot_recv()",
-		"    return _fn",
-		"",
-		"def _mk_sensor(_query):",
-		"    def _fn():",
-		"        _robot_send('[QUERY] ' + _query + ' [LINE] ' + str(sys._getframe(1).f_lineno))",
-		"        return _robot_recv() == 'true'",
-		"    return _fn",
-		"",
-	]
-	# Commands: send [CMD], wait for Godot's OK before continuing
-	for cmd in COMMANDS:
-		lines.append("setattr(_robot_mod, '%s', _mk_cmd('%s'))" % [cmd.name, cmd.cmd])
-		lines.append("_robot_exports.append('%s')" % cmd.name)
-	for sensor in SENSORS:
-		lines.append("setattr(_robot_mod, '%s', _mk_sensor('%s'))" % [sensor.name, sensor.query])
-		lines.append("_robot_exports.append('%s')" % sensor.name)
-	lines.append("_robot_mod.__all__ = _robot_exports")
-	lines.append("sys.modules['robot'] = _robot_mod")
-	lines.append("")
-	return "\n".join(lines)
-
 
 ## Named-pipe bootstrap for the AppContainer sandbox. The worker creates the pipe
 ## as PIPE_TYPE_MESSAGE but the Python client never sets PIPE_READMODE_MESSAGE, so
@@ -323,79 +267,7 @@ func _cpp_command_implementation_lines() -> Array:
 	return lines
 
 
-## robot_runtime.cpp — cross-platform socket bootstrap + all implementations.
-## Port is baked in at generation time so no runtime argument is needed.
-func get_cpp_source(port: int, token: String) -> String:
-	var lines := [
-		"#include \"robot.hpp\"",
-		"#include <string>",
-		"#include <cstdint>",
-		"",
-		"#ifdef _WIN32",
-		"#  ifndef _WIN32_WINNT",
-		"#    define _WIN32_WINNT 0x0601",
-		"#  endif",
-		"#  define WIN32_LEAN_AND_MEAN",
-		"#  include <winsock2.h>",
-		"#  include <ws2tcpip.h>",
-		"   typedef SOCKET __sock_t;",
-		"#  define __sock_close(s) closesocket(s)",
-		"#else",
-		"#  include <sys/socket.h>",
-		"#  include <arpa/inet.h>",
-		"#  include <unistd.h>",
-		"   typedef int __sock_t;",
-		"#  define __sock_close(s) close(s)",
-		"#endif",
-		"",
-		"static __sock_t __robot_sock;",
-		"static std::string __robot_buf;",
-		"",
-		"static void __robot_connect() {",
-		"#ifdef _WIN32",
-		"    WSADATA wsa; WSAStartup(MAKEWORD(2,2), &wsa);",
-		"#endif",
-		"    __robot_sock = socket(AF_INET, SOCK_STREAM, 0);",
-		"    struct sockaddr_in addr{};",
-		"    addr.sin_family      = AF_INET;",
-		"    addr.sin_port        = htons(%d);" % port,
-		"    addr.sin_addr.s_addr = inet_addr(\"127.0.0.1\");",
-		"    connect(__robot_sock, (struct sockaddr*)&addr, sizeof(addr));",
-		"}",
-		"",
-		"static void __robot_send(const std::string& msg) {",
-		"    std::string line = msg + \"\\n\";",
-		"    send(__robot_sock, line.c_str(), (int)line.size(), 0);",
-		"}",
-		"",
-		"static std::string __robot_recv() {",
-		"    while (true) {",
-		"        auto pos = __robot_buf.find('\\n');",
-		"        if (pos != std::string::npos) {",
-		"            std::string line = __robot_buf.substr(0, pos);",
-		"            __robot_buf = __robot_buf.substr(pos + 1);",
-		"            if (!line.empty() && line.back() == '\\r') line.pop_back();",
-		"            return line;",
-		"        }",
-		"        char tmp[256];",
-		"        int n = recv(__robot_sock, tmp, sizeof(tmp), 0);",
-		"        if (n <= 0) return \"\";",
-		"        __robot_buf.append(tmp, n);",
-		"    }",
-		"}",
-		"",
-		"struct __RobotLifetime {",
-		"    __RobotLifetime()  { __robot_connect(); __robot_send(\"[AUTH] %s\"); }" % token,
-		"    ~__RobotLifetime() { __robot_send(\"[DONE]\"); __sock_close(__robot_sock); }",
-		"} __robot_lifetime;",
-		"",
-	]
-	lines.append_array(_cpp_command_implementation_lines())
-	return "\n".join(lines)
-
-
 func get_cpp_pipe_source() -> String:
-
 	var lines := [
 		"#include <fstream>",
 		"#include \"robot.hpp\"",

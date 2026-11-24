@@ -695,11 +695,6 @@ int main(int argc, char* argv[]) {
         if (argc == 6 && (std::string(argv[1]) == "--run-cpp" || std::string(argv[1]) == "--run-python")) {
             return run_student(std::string(argv[1]) == "--run-python", argv[2], argv[3], std::stoi(argv[4]), argv[5]);
         }
-        if (argc == 4 && std::string(argv[1]) == "--make-run-dir") {
-            const fs::path path = make_run_directory(argv[2], argv[3]);
-            std::cout << "{\"type\":\"run_directory\",\"path\":\"" << json_escape(path.string()) << "\"}" << std::endl;
-            return 0;
-        }
     } catch (const std::exception& error) {
         std::cerr << error.what() << std::endl;
         return 1;

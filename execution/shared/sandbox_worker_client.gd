@@ -121,16 +121,6 @@ func prepare_python_run(run_id: String, cleanup_token: String, python_runtime_pa
 	return {"ok": true, "path": run_path}
 
 
-func create_run_directory(run_id: String, cleanup_token: String) -> Dictionary:
-	var result := _run_worker(["--make-run-dir", run_id, cleanup_token])
-	if not result.ok:
-		return {"ok": false, "message": result.message}
-	var response := _parse_json_response(result.output)
-	if response.get("type", "") != "run_directory" or str(response.get("path", "")).is_empty():
-		return {"ok": false, "message": "Worker returned an invalid run-directory response."}
-	return {"ok": true, "path": str(response["path"])}
-
-
 func delete_run_directory(run_id: String, cleanup_token: String) -> Dictionary:
 	var result := _run_worker(["--delete-run-dir", run_id, cleanup_token])
 	if not result.ok:
