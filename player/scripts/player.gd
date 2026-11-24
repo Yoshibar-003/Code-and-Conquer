@@ -21,16 +21,22 @@ var _active_tween_is_fall: bool = false
 var _move_from_x: int = 0
 var _move_from_y: int = 0
 var _move_duration: float = 0.0
-var _move_start_msec: int = 0
+# Frame-time move clock: accumulated in _process() so synchronous world
+# rebuilds (camera rotation) pause the move instead of letting wall-clock
+# time run ahead of the tween.
+var _move_frame_elapsed := 0.0
 # Pixel-space endpoints of the active move segment in the current rotation
-# frame. Used to recover true tween progress on rotation retarget; wall-clock
-# progress overstates it because the world rebuild stalls frames while
-# Time.get_ticks_msec() keeps running.
+# frame. Used to recover true tween progress on rotation retarget.
 var _move_pixel_from := Vector2.ZERO
 var _move_pixel_to := Vector2.ZERO
 
 func _ready() -> void:
 	pass
+
+
+func _process(delta: float) -> void:
+	if _move_in_progress and not _active_tween_is_fall and _move_duration > 0.0:
+		_move_frame_elapsed += delta
 
 
 func _exit_tree() -> void:
@@ -89,6 +95,7 @@ func initialize_from_level(robot_data: Dictionary, world_pos: Vector2, is_rotati
 		_active_tween_duration = 0.0
 		_active_tween_is_fall = false
 		_move_duration = 0.0
+		_move_frame_elapsed = 0.0
 
 	if not is_rotating:
 		modulate.a = 1.0
@@ -154,7 +161,7 @@ func move_forward(duration: float = 0.5) -> void:
 	if world.has_method("player_grid_position"):
 		var target_pos: Vector2 = world.player_grid_position(grid_x, grid_y)
 		_start_move_tween(target_pos, duration)
-		await _wait_seconds(duration)
+		await _wait_move_duration()
 
 	_move_in_progress = false
 
@@ -179,7 +186,7 @@ func _start_move_tween(target_pos: Vector2, duration: float) -> void:
 	current_tween = create_tween()
 	current_tween.tween_property(self, "position", target_pos, duration)
 	_move_duration = duration
-	_move_start_msec = Time.get_ticks_msec()
+	_move_frame_elapsed = 0.0
 	_active_tween_is_fall = false
 
 
@@ -199,6 +206,18 @@ func _wait_seconds(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 
 
+## Waits until the frame-time move clock reaches _move_duration. Unlike a
+## SceneTreeTimer, this pauses during synchronous stalls (e.g. the world
+## rebuild inside rotate_world_right), keeping move_finished on the same
+## schedule as the tween. Exits early if the tween is killed externally.
+func _wait_move_duration() -> void:
+	while _move_frame_elapsed < _move_duration:
+		var tween_active := current_tween != null and is_instance_valid(current_tween) and current_tween.is_running()
+		if not tween_active:
+			break
+		await get_tree().process_frame
+
+
 func _active_tween_remaining() -> float:
 	if _active_tween_duration <= 0.0:
 		return 0.0
@@ -207,7 +226,7 @@ func _active_tween_remaining() -> float:
 
 
 func _move_elapsed() -> float:
-	return float(Time.get_ticks_msec() - _move_start_msec) / 1000.0
+	return _move_frame_elapsed
 
 
 func _move_remaining() -> float:
