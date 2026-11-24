@@ -103,7 +103,7 @@ func _add_levels_from_folder(path: String) -> void:
 				"This level file is invalid and cannot be played."
 			)
 			print("Disabled invalid level: ", full_path)
-		
+
 		if not is_valid:
 			set_item_disabled(item_index, true)
 			set_item_text(item_index, display_name + " (Invalid)")

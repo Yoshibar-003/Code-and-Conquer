@@ -111,6 +111,8 @@ var _ipc_server = null
 var _subprocess_pid: int = -1
 var _sandbox_run_id: String = ""
 var _sandbox_cleanup_token: String = ""
+var _sandbox_cleanup_epoch: int = 0  # bumped on new credentials and each cleanup; stale cleanups abort
+var _sandbox_deleted_run_keys: Dictionary = {}
 var _ipc_active: bool = false
 var _ipc_loop_running: bool = false
 var _run_pending: bool = false
@@ -118,7 +120,14 @@ var _run_pending: bool = false
 # === step history for step back ===
 var _cmd_history: Array = []	# [{cmd, src_line, snap}] - snap is state before the cmd ran
 var _step_index: int = 0		# how many commands the user has seen
+var _moves_used_count: int = 0	# MOVE commands within _cmd_history[0.._step_index)
 var _in_replay: bool = false	# true when replaying from history
+
+# Shared object_data copy for the current mutation epoch. Only PICK_OBJECT and
+# PUT_OBJECT change object_data, so consecutive MOVE/TURN snapshots can all
+# reference the same dict instead of each duplicating the whole object map.
+var _obj_snap: Dictionary = {}
+var _obj_snap_valid := false
 
 # === pause state ===
 var _paused: bool = false
@@ -126,6 +135,7 @@ signal _resume
 
 var current_line_offset: int = 0
 var _is_handling_lose: bool = false
+var _highlighted_line: int = -1
 var _controls_locked: bool = false
 
 var global_level_name := ""
@@ -156,6 +166,7 @@ var _compile_worker := preload("res://execution/cpp/cpp_compile_worker.gd").new(
 var _auto_accept_quit_before := true
 
 const ALLOWED_IPC_COMMANDS := ["MOVE", "TURN_LEFT", "PICK_OBJECT", "PUT_OBJECT"]
+const OBJECT_MUTATING_COMMANDS := ["PICK_OBJECT", "PUT_OBJECT"]
 const ALLOWED_IPC_QUERIES := [
 	"FRONT_IS_CLEAR",
 	"RIGHT_IS_CLEAR",
@@ -190,10 +201,8 @@ func _ready() -> void:
 	# auto_accept_quit disabled so _notification can clean up before Godot exits.
 	_auto_accept_quit_before = get_tree().auto_accept_quit
 	get_tree().set_auto_accept_quit(false)		# required for _notification to intercept window close
-	if OS.get_name() == "Windows":
-		OS.execute("taskkill", ["/F", "/IM", "student_program.exe"], [], true)
-	else:
-		OS.execute("pkill", ["-f", "student_program"], [], true)
+	# Deferred so the blocking OS.execute doesn't delay scene setup.
+	call_deferred("_kill_stale_student_program")
 
 	_set_status("Ready", "")
 
@@ -219,6 +228,9 @@ func _ready() -> void:
 	run_button.pressed.connect(_on_run_button_pressed)
 	check_button.pressed.connect(_on_check_button_pressed)
 	editor.text_changed.connect(_on_editor_text_changed)
+	# Programmatic `editor.text = ...` (template/level loads) emits text_set,
+	# not text_changed — both must clear the tracked line highlight.
+	editor.text_set.connect(_on_editor_text_changed)
 	run_button.disabled = true
 	step_button.pressed.connect(_on_step_button_pressed)
 	prev_button.pressed.connect(_on_prev_button_pressed)
@@ -270,6 +282,13 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_load_level_scene(true)
 	_loaded_level_path = SelectedLevel.path
+
+func _kill_stale_student_program() -> void:
+	if OS.get_name() == "Windows":
+		OS.execute("taskkill", ["/F", "/IM", "student_program.exe"], [], true)
+	else:
+		OS.execute("pkill", ["-f", "student_program"], [], true)
+
 
 func _setup_level_windows() -> void:
 	level_type_window = Window.new()
@@ -522,10 +541,7 @@ func _apply_saved_preferences() -> void:
 
 
 func _saved_setting(section: String, key: String, fallback):
-	var config := ConfigFile.new()
-	if config.load("user://settings.cfg") == OK:
-		return config.get_value(section, key, fallback)
-	return fallback
+	return SettingsManager.get_setting(section, key, fallback)
 
 
 func _refresh_campaign_instructions() -> void:
@@ -617,6 +633,7 @@ func _load_level_scene(load_editor_text: bool = true, preserve_camera: bool = fa
 		child.queue_free()
 
 	flat_grid_node = null
+	_obj_snap_valid = false
 	game_instance = new_game_instance
 	game_subviewport.add_child(game_instance)
 
@@ -754,6 +771,7 @@ func _on_language_changed(index: int) -> void:
 	current_language = Language.CPP if index == 0 else Language.PYTHON
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 	_refresh_level_limits()
 	output_box.clear()
@@ -909,7 +927,11 @@ func _resume_after_step_back(run_id: int) -> void:
 	while _step_index < _cmd_history.size() and _ipc_active and _run_id == run_id:
 		var entry = _cmd_history[_step_index]
 		_step_index += 1
+		if entry.cmd == "MOVE":
+			_moves_used_count += 1
 		await _animate_command(entry.cmd, entry.src_line, run_id)
+		if OBJECT_MUTATING_COMMANDS.has(entry.cmd):
+			_obj_snap_valid = false
 		if _run_id != run_id or not _ipc_active:
 			return
 		if _paused:
@@ -966,6 +988,8 @@ func _on_prev_button_pressed() -> void:
 		return
 
 	_step_index -= 1
+	if _cmd_history[_step_index].cmd == "MOVE":
+		_moves_used_count -= 1
 	_in_replay = true
 	_restore_snapshot(_cmd_history[_step_index].snap)
 	_refresh_level_limits()
@@ -982,17 +1006,18 @@ func _on_prev_button_pressed() -> void:
 
 
 func _take_snapshot() -> Dictionary:
-	var obj_copy: Dictionary = {}
-
-	for key in game_instance.object_data:
-		obj_copy[key] = game_instance.object_data[key].duplicate()
+	if not _obj_snap_valid:
+		_obj_snap = {}
+		for key in game_instance.object_data:
+			_obj_snap[key] = game_instance.object_data[key].duplicate()
+		_obj_snap_valid = true
 
 	return {
 		grid_x = player_node.grid_x,
 		grid_y = player_node.grid_y,
 		facing = player_node.facing,
 		carried_object = player_node.carried_object.duplicate(),
-		object_data = obj_copy
+		object_data = _obj_snap
 	}
 
 
@@ -1008,6 +1033,7 @@ func _restore_snapshot(snap: Dictionary) -> void:
 
 	player_node.update_animation(false)
 	game_instance.restore_object_data(snap.object_data)
+	_obj_snap_valid = false
 
 	if _step_index > 0:
 		_highlight_editor_line(_cmd_history[_step_index - 1].src_line)
@@ -1018,7 +1044,11 @@ func _restore_snapshot(snap: Dictionary) -> void:
 func _replay_step_forward(run_id: int) -> void:
 	var entry = _cmd_history[_step_index]
 	_step_index += 1
+	if entry.cmd == "MOVE":
+		_moves_used_count += 1
 	await _animate_command(entry.cmd, entry.src_line, run_id)
+	if OBJECT_MUTATING_COMMANDS.has(entry.cmd):
+		_obj_snap_valid = false
 	if _run_id != run_id or not _ipc_active:
 		return
 
@@ -1041,13 +1071,17 @@ func _highlight_editor_line(line: int) -> void:
 
 	if adjusted >= 0 and adjusted < editor.get_line_count():
 		editor.set_line_background_color(adjusted, Color(0.30, 0.60, 0.30, 0.25))
+		_highlighted_line = adjusted
 		editor.set_caret_line(adjusted)
 		editor.center_viewport_to_caret()
 
 
 func _clear_editor_highlights() -> void:
-	for i in range(editor.get_line_count()):
-		editor.set_line_background_color(i, Color(0, 0, 0, 0))
+	# Only one line is ever highlighted at a time, so clear just that line
+	# instead of iterating every line in the file on each command.
+	if _highlighted_line >= 0 and _highlighted_line < editor.get_line_count():
+		editor.set_line_background_color(_highlighted_line, Color(0, 0, 0, 0))
+	_highlighted_line = -1
 
 
 func _on_reset_button_pressed() -> void:
@@ -1076,6 +1110,7 @@ func _on_reset_button_pressed() -> void:
 	_clear_editor_highlights()
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 
 	run_button.text = "▶ Run"
@@ -1355,7 +1390,7 @@ func _on_level_complete() -> void:
 	_stop_execution()
 	var campaign_index := Campaign.index_for_path(SelectedLevel.path)
 	# Hide Next Level by default, including for custom levels.
-	campaign_next_button.visible = false	
+	campaign_next_button.visible = false
 	if campaign_index >= 0:
 		var save_error := Campaign.mark_complete(SelectedLevel.path, campaign_progress_path)
 		if save_error != OK:
@@ -1421,20 +1456,49 @@ func _cleanup_sandbox_run() -> void:
 	if _sandbox_run_id.is_empty() or _sandbox_cleanup_token.is_empty():
 		return
 
+	# Callers don't await this function, so the awaits below let a new run
+	# replace _sandbox_run_id/_sandbox_cleanup_token. Capture the credentials
+	# and claim an epoch so retries can't delete a newer run's folder and a
+	# superseded cleanup aborts instead of racing the new one.
+	_sandbox_cleanup_epoch += 1
+	var epoch := _sandbox_cleanup_epoch
+	var run_id := _sandbox_run_id
+	var token := _sandbox_cleanup_token
+	var deleted_key := run_id + ":" + token
 	var cleanup: Dictionary = {}
 
 	for attempt in range(5):
-		cleanup = sandbox_worker.delete_run_directory(
-			_sandbox_run_id,
-			_sandbox_cleanup_token
-		)
+		cleanup = sandbox_worker.delete_run_directory(run_id, token)
 
 		if cleanup.ok:
-			_sandbox_run_id = ""
-			_sandbox_cleanup_token = ""
+			_sandbox_deleted_run_keys[deleted_key] = true
+			# Only clear the members if a newer run hasn't claimed them.
+			if _sandbox_run_id == run_id and _sandbox_cleanup_token == token:
+				_sandbox_run_id = ""
+				_sandbox_cleanup_token = ""
 			return
 
-		OS.delay_msec(250)
+		# Async sleep so retries don't freeze the main thread. If the tree is
+		# shutting down (window close), the timer may never fire, which is
+		# fine since the process is exiting anyway.
+		await get_tree().create_timer(0.25).timeout
+
+		# A new run (or another cleanup) superseded this one while we slept.
+		if _sandbox_cleanup_epoch != epoch:
+			# Only skip when this exact folder was already deleted or the same
+			# credentials are still owned by another cleanup. Empty members count
+			# as changed: a newer run may have finished and cleared them.
+			var credentials_changed := _sandbox_run_id != run_id or _sandbox_cleanup_token != token
+			if not _sandbox_deleted_run_keys.has(deleted_key) and credentials_changed:
+				var stale_cleanup := sandbox_worker.delete_run_directory(run_id, token)
+				if stale_cleanup.ok:
+					_sandbox_deleted_run_keys[deleted_key] = true
+				else:
+					log_warning(
+						"Could not remove superseded run folder: "
+						+ stale_cleanup.message
+					)
+			return
 
 	log_warning(
 		"Could not remove secure run folder after retries: "
@@ -1539,11 +1603,7 @@ func _animate_command(cmd: String, src_line: int, run_id: int, live: bool = fals
 
 
 func _moves_used() -> int:
-	var count := 0
-	for i in range(mini(_step_index, _cmd_history.size())):
-		if _cmd_history[i].cmd == "MOVE":
-			count += 1
-	return count
+	return _moves_used_count
 
 
 func _refresh_level_limits() -> void:
@@ -1565,7 +1625,7 @@ func _run_pipeline() -> void:
 	var start_paused: bool = _paused
 	_stop_execution()
 	_run_pending = true
-	
+
 	# Close level selection windows when execution begins.
 	if level_type_window != null:
 		level_type_window.hide()
@@ -1595,6 +1655,7 @@ func _run_pipeline() -> void:
 	log_header("run")
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 	_refresh_level_limits()
 	_is_handling_lose = false
@@ -1675,6 +1736,7 @@ func _run_pipeline() -> void:
 	log_line("Secure run folder prepared.")
 	_sandbox_run_id = sandbox_run_id
 	_sandbox_cleanup_token = sandbox_cleanup_token
+	_sandbox_cleanup_epoch += 1  # abort any cleanup still retrying for the old run
 
 	var sandbox_ipc_endpoint := ""
 	if OS.get_name() == "Windows":
@@ -1863,8 +1925,12 @@ func _run_ipc_loop(run_id: int) -> void:
 			var snap = _take_snapshot()
 			_cmd_history.append({cmd = cmd, src_line = src_line, snap = snap})
 			_step_index = _cmd_history.size()
+			if cmd == "MOVE":
+				_moves_used_count += 1
 
 			await _animate_command(cmd, src_line, run_id, true)
+			if OBJECT_MUTATING_COMMANDS.has(cmd):
+				_obj_snap_valid = false
 
 			if _run_id != run_id or not _ipc_active:
 				break
@@ -2006,11 +2072,9 @@ func _execute_cmd(cmd: String, src_line: int) -> void:
 			var move_done := [false]
 			player_node.move_finished.connect(func(): move_done[0] = true, CONNECT_ONE_SHOT)
 			player_node.move_forward(exec_speed)
-			var waited := 0.0
-			var move_timeout := exec_speed * 3.0 + 0.5
-			while is_instance_valid(player_node) and _ipc_active and not move_done[0] and waited < move_timeout:
-				await get_tree().create_timer(0.05).timeout
-				waited += 0.05
+			var move_timeout := get_tree().create_timer(exec_speed * 3.0 + 0.5)
+			while is_instance_valid(player_node) and _ipc_active and not move_done[0] and move_timeout.time_left > 0.0:
+				await get_tree().process_frame
 			if _ipc_active and is_instance_valid(player_node) and not move_done[0]:
 				# The move never finished (stuck/killed tween). Treat it as a
 				# failed run rather than acknowledging the command and letting
@@ -2514,6 +2578,12 @@ func _on_editor_text_changed() -> void:
 	if not _ipc_active:
 		run_button.disabled = true
 	checked_cpp_executable = ""
+	# Edits can shift line numbers, so a tracked highlight may point at the
+	# wrong line. Clear all line colors once while a highlight is active.
+	if _highlighted_line >= 0:
+		for i in range(editor.get_line_count()):
+			editor.set_line_background_color(i, Color(0, 0, 0, 0))
+		_highlighted_line = -1
 
 func _on_check_button_pressed() -> void:
 	if _compile_task_id >= 0:
@@ -2748,6 +2818,7 @@ func _switch_level() -> void:
 	# Reset execution history for the new level.
 	_cmd_history.clear()
 	_step_index = 0
+	_moves_used_count = 0
 	_in_replay = false
 	_is_handling_lose = false
 	_run_outcome = "incomplete"

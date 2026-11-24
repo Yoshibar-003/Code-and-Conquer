@@ -37,6 +37,25 @@ var camera_bounds_ready := false
 var camera_dragging := false
 var _pending_camera_restore: Dictionary = {}
 var backdrop: Node2D
+# Bumped every time objects are rebuilt so views (e.g., flat_grid_view) know
+# when object_data changed and a redraw is needed.
+var objects_version := 0
+# Bumped every time level lookups are rebuilt (build_level, invalidate_lookups)
+# so views that cache level_data (e.g., flat_grid_view static caches) know to
+# re-parse walls/goal/void tiles.
+var level_version := 0
+# Precomputed per-level lookups, rebuilt in build_level(). Keys are Vector2i
+# grid coords so hot queries avoid string formatting.
+var _goal_cells := {}   # Vector2i -> true
+var _void_cells := {}   # Vector2i -> true
+var _wall_faces := {}   # Vector2i -> Array[String] of lowercased faces
+# Texture/font caches so spawning objects doesn't hit the resource loader each time.
+var _object_textures := {}
+var _goal_textures := {}
+var _count_font = null
+# cell_key -> Array[Node] index of spawned object sprites/labels, so per-cell
+# refresh only touches that cell's nodes instead of scanning objects_node.
+var _objects_by_cell := {}
 # =======================================
 
 
@@ -177,15 +196,15 @@ func _update_camera_pan_bounds() -> void:
 
 # ======= MAIN POINT: Build Rendition =======
 ## Builds a world given that JSON data (format: Reborg)
-##
-## INPUTS: A dictonary that describe the world (obj:description)
-## OUTPUS: A render of the world given by dictionary
+## Input:  A dictonary that describe the world (obj:description)
+## Output: A render of the world given by dictionary
 func build_level(data: Dictionary) -> void:
 	is_rotating = false
 	level_data = data
 	object_data = {}
 	for _k in data.get("objects", {}).keys():
 		object_data[_k] = (data["objects"][_k] as Dictionary).duplicate()
+	_rebuild_lookups(data)
 	rotation_state = 0
 	# IF NEEDED: enforce ordering
 	FloorTiles.z_index = 0
@@ -261,10 +280,52 @@ func _rotate_world():
 	else:
 		push_warning("JSON loaded, but 'cols' or 'rows' keys were missing!")
 
+## Precompute wall-direction, goal-cell and void-tile lookups once per level so
+## per-command queries (is_move_blocked, is_at_goal, is_void) stay O(1).
+## Keys are Vector2i logical grid coords, which are rotation-independent.
+func _rebuild_lookups(data: Dictionary) -> void:
+	_goal_cells.clear()
+	_void_cells.clear()
+	_wall_faces.clear()
+
+	var walls = data.get("walls", {})
+	if walls is Dictionary:
+		for key in walls:
+			var parts := str(key).split(",")
+			if parts.size() == 2 and parts[0].is_valid_int() and parts[1].is_valid_int():
+				var faces: Array[String] = []
+				for face in walls[key]:
+					faces.append(str(face).to_lower())
+				_wall_faces[Vector2i(int(parts[0]), int(parts[1]))] = faces
+
+	var void_tiles = data.get("void_tiles", {})
+	if void_tiles is Dictionary:
+		for key in void_tiles:
+			if void_tiles[key] != true:
+				continue
+			var parts := str(key).split(",")
+			if parts.size() == 2 and parts[0].is_valid_int() and parts[1].is_valid_int():
+				_void_cells[Vector2i(int(parts[0]), int(parts[1]))] = true
+
+	if data.has("goal"):
+		var goal = data["goal"]
+		if goal is Dictionary:
+			if goal.has("possible_final_positions"):
+				for pos in goal["possible_final_positions"]:
+					if typeof(pos) == TYPE_ARRAY and pos.size() >= 2:
+						_goal_cells[Vector2i(int(pos[0]), int(pos[1]))] = true
+			if goal.has("position"):
+				var pos = goal["position"]
+				if typeof(pos) == TYPE_DICTIONARY:
+					_goal_cells[Vector2i(int(pos.get("x", -1)), int(pos.get("y", -1)))] = true
+
+	level_version += 1
+
+
 # ====== World Rendering Functions ======
 
 ## Rotate a 0-based floor cell for the current camera angle.
-## Uses cols and rows separately so non-square grids (e.g. 6x10) stay aligned.
+## Uses cols and rows separately so non-square grids (e.g., 6x10) stay aligned.
 func _rotate_floor_cell(x: int, y: int, cols: int, rows: int) -> Vector2i:
 	match rotation_state:
 		1:
@@ -443,59 +504,63 @@ func _build_walls(data: Dictionary, cols: int, rows: int) -> void:
 					
 					grid_pos = Vector2(temp_pos[0], temp_pos[1]+1)
 					WallTiles.set_cell(grid_pos, 44, Vector2i(6,1))
-				
-			#Add a corner
-			if rotation_state == 1:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]+1))
-					if other_wall == Vector2i(6,1):
-						var corner_pos = Vector2i(cell[0]-1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(3,2))
-			elif rotation_state == 2:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]+1))
-					if other_wall == Vector2i(5,1):
-						var corner_pos = Vector2i(cell[0]+1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(1,2))
-			elif rotation_state == 3:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]-1))
-					if other_wall == Vector2i(5,1):
-						var corner_pos = Vector2i(cell[0]+1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(0,2))
-			else:
-				#find all cell that id
-				var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
-		
-				# You can now loop through this array directly
-				for cell in all_floor_cells:
-					var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]-1))
-					if other_wall == Vector2i(6,1):
-						var corner_pos = Vector2i(cell[0]-1,cell[1])
-						# T-intersection: skip corner if a straight wall already occupies this cell
-						if WallTiles.get_cell_source_id(corner_pos) == -1:
-							WallTiles.set_cell(corner_pos, 44, Vector2i(2,2))
 
+		_place_wall_corners()
 	else:
 		push_warning("JSON loaded, but 'walls' keys were missing!")
+
+
+## Places wall corner/junction tiles in a single pass after all wall segments are set.
+func _place_wall_corners() -> void:
+	# Add a corner
+	if rotation_state == 1:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]+1))
+			if other_wall == Vector2i(6,1):
+				var corner_pos = Vector2i(cell[0]-1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(3,2))
+	elif rotation_state == 2:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(7,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]+1))
+			if other_wall == Vector2i(5,1):
+				var corner_pos = Vector2i(cell[0]+1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(1,2))
+	elif rotation_state == 3:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]+1,cell[1]-1))
+			if other_wall == Vector2i(5,1):
+				var corner_pos = Vector2i(cell[0]+1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(0,2))
+	else:
+		#find all cell that id
+		var all_floor_cells: Array[Vector2i] = WallTiles.get_used_cells_by_id(44, Vector2i(4,1))
+
+		# You can now loop through this array directly
+		for cell in all_floor_cells:
+			var other_wall = WallTiles.get_cell_atlas_coords(Vector2i(cell[0]-1,cell[1]-1))
+			if other_wall == Vector2i(6,1):
+				var corner_pos = Vector2i(cell[0]-1,cell[1])
+				# T-intersection: skip corner if a straight wall already occupies this cell
+				if WallTiles.get_cell_source_id(corner_pos) == -1:
+					WallTiles.set_cell(corner_pos, 44, Vector2i(2,2))
 
 func _build_goal_cells(data: Dictionary, cols: int, rows: int) -> void:
 	if not data.has("goal"):
@@ -696,7 +761,13 @@ func is_in_bounds(gx: int, gy: int) -> bool:
 
 
 func is_void(gx: int, gy: int) -> bool:
-	return preload("res://map/scripts/void_tiles.gd").contains(level_data, gx, gy)
+	return _void_cells.has(Vector2i(gx, gy))
+
+## Rebuilds the cached lookups from the current level_data. Call this after
+## mutating level_data["walls"] (or goal/void tiles) at runtime.
+func invalidate_lookups() -> void:
+	_rebuild_lookups(level_data)
+
 
 ## Check if movement in dir from (gx,gy) is blocked by a wall.
 ## Walls are stored as "east" and "north" only (Reborg format).
@@ -715,34 +786,24 @@ func is_move_blocked(gx: int, gy: int, dir: String) -> bool:
 	if not is_in_bounds(next_x, next_y):
 		return true
 	
-	# Check if wall even exist
-	if not level_data.has("walls"):
-		return false
-	
 	# Direct check: does this cell have a wall on this face?
 	# Covers "east" and "north" moves.
-	var key := "%d,%d" % [gx, gy]
-	if level_data["walls"].has(key):
-		for d in level_data["walls"][key]:
-			if str(d).to_lower() == dir:
-				return true
+	for face in _wall_faces.get(Vector2i(gx, gy), []):
+		if face == dir:
+			return true
 	
 	# Indirect check: moving west/south means checking the neighbour's east/north wall.
 	# A "west" wall on (gx,gy) is stored as an "east" wall on (gx-1,gy).
 	# A "south" wall on (gx,gy) is stored as a "north" wall on (gx,gy-1).
 	match dir:
 		"west":
-			var adj := "%d,%d" % [gx - 1, gy]
-			if level_data["walls"].has(adj):
-				for d in level_data["walls"][adj]:
-					if str(d).to_lower() == "east":
-						return true
+			for face in _wall_faces.get(Vector2i(gx - 1, gy), []):
+				if face == "east":
+					return true
 		"south":
-			var adj := "%d,%d" % [gx, gy - 1]
-			if level_data["walls"].has(adj):
-				for d in level_data["walls"][adj]:
-					if str(d).to_lower() == "north":
-						return true
+			for face in _wall_faces.get(Vector2i(gx, gy - 1), []):
+				if face == "north":
+					return true
 						
 	return false
 
@@ -752,23 +813,11 @@ func _cell_key(gx: int, gy: int) -> String:
 
 func get_rotation_step() -> int:
 	return rotation_state
+
 # Returns true if the given grid position satisfies the goal condition.
 # Used by the IPC query system without emitting the win signal.
 func is_at_goal(gx: int, gy: int) -> bool:
-	if not level_data.has("goal"):
-		return false
-	var goal = level_data["goal"]
-	if goal.has("possible_final_positions"):
-		for pos in goal["possible_final_positions"]:
-			if typeof(pos) == TYPE_ARRAY and pos.size() >= 2:
-				if int(pos[0]) == gx and int(pos[1]) == gy:
-					return true
-	if goal.has("position"):
-		var pos = goal["position"]
-		if typeof(pos) == TYPE_DICTIONARY:
-			if int(pos.get("x", -1)) == gx and int(pos.get("y", -1)) == gy:
-				return true
-	return false
+	return _goal_cells.has(Vector2i(gx, gy))
 
 # === win condition ===
 # Returns true when every required object is present at its goal cell
@@ -872,31 +921,69 @@ func object_grid_position(x_pos: int, y_pos: int) -> Vector2:
 
 func _build_objects() -> void:
 	_clear_children(objects_node)
+	_objects_by_cell.clear()
+	objects_version += 1
 	
-	# Render goal-object outlines first so actual objects draw on top
-	_build_goal_object_markers()
-	
+	var keys := {}
+	if level_data.has("goal") and level_data["goal"].has("objects"):
+		for key in level_data["goal"]["objects"].keys():
+			keys[key] = true
 	for key in object_data.keys():
-		var parts = key.split(",")
-		if parts.size() != 2:
-			continue
+		keys[key] = true
+	for key in keys.keys():
+		_spawn_cell_objects(key)
 
-		var gx := int(parts[0])
-		var gy := int(parts[1])
 
-		var tile_objects: Dictionary = object_data[key]
+## Spawns goal markers, objects, and count labels for a single "x,y" cell key.
+## Shared by the full rebuild and the per-cell refresh used on pick/place.
+func _spawn_cell_objects(key: String) -> void:
+	var parts := key.split(",")
+	if parts.size() != 2:
+		return
+	var gx := int(parts[0])
+	var gy := int(parts[1])
 
-		for object_name in tile_objects.keys():
-			var count := int(tile_objects[object_name])
+	# Goal-object outlines first so actual objects draw on top
+	var is_goal_tile := false
+	if level_data.has("goal") and level_data["goal"].has("objects"):
+		var goal_objs: Dictionary = level_data["goal"]["objects"]
+		if goal_objs.has(key):
+			is_goal_tile = true
+			var required: Dictionary = goal_objs[key]
+			for obj_name in required:
+				var needed := int(required[obj_name])
+				var have := 0
+				if object_data.has(key) and object_data[key].has(obj_name):
+					have = int(object_data[key][obj_name])
+				for i in range(needed):
+					_spawn_goal_marker(obj_name, gx, gy, i < have)
+				_add_goal_count_label(gx, gy, have, needed)
 
-			for i in range(count):
-				_spawn_object(object_name, gx, gy)
+	if not object_data.has(key):
+		return
+	var tile_objects: Dictionary = object_data[key]
+	for object_name in tile_objects.keys():
+		var count := int(tile_objects[object_name])
+		for i in range(count):
+			_spawn_object(object_name, gx, gy)
+	if not is_goal_tile:
+		_add_object_count_label(gx, gy, tile_objects)
 
-		var is_goal_tile : bool = level_data.has("goal") \
-			and level_data["goal"].has("objects") \
-			and level_data["goal"]["objects"].has(key)
-		if not is_goal_tile:
-			_add_object_count_label(gx, gy, tile_objects)
+
+## Rebuilds only the sprites/labels for one cell. Used by pick/place so a
+## command doesn't respawn every object on the map.
+func _refresh_cell_objects(key: String) -> void:
+	for child in _objects_by_cell.get(key, []):
+		child.free()
+	_objects_by_cell.erase(key)
+	_spawn_cell_objects(key)
+	objects_version += 1
+
+## Registers a freshly spawned node under its cell key for per-cell refresh.
+func _track_cell_node(node: Node, key: String) -> void:
+	if not _objects_by_cell.has(key):
+		_objects_by_cell[key] = []
+	_objects_by_cell[key].append(node)
 
 ## Computes a uniform sprite scale so any object texture renders at roughly
 ## one tile-sized visual (200px), without shrinking already-small icons.
@@ -907,7 +994,12 @@ func _object_sprite_scale(tex: Texture2D) -> float:
 
 func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var sprite := Sprite2D.new()
-	var tex := load("res://assets/objects/" + object_name + ".png") as Texture2D
+	var tex: Texture2D
+	if _object_textures.has(object_name):
+		tex = _object_textures[object_name]
+	else:
+		tex = load("res://assets/objects/" + object_name + ".png") as Texture2D
+		_object_textures[object_name] = tex
 	if tex != null:
 		sprite.texture = tex
 		# Old object art was tiny, while the new token icon is high-resolution.
@@ -918,39 +1010,21 @@ func _spawn_object(object_name: String, gx: int, gy: int) -> void:
 	var grid_pos = object_grid_position(gx, gy + 1)
 	sprite.position = Vector2i(int(grid_pos[0] + offset_x), int(grid_pos[1] + offset_y))
 	sprite.z_index = 0
+	sprite.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(sprite)
-
-
-## Renders outlined diamond markers for every object required by the level goal.
-## Unsatisfied slots show in the object's colour; satisfied slots turn green.
-## Called before actual objects so markers sit visually behind them.
-func _build_goal_object_markers() -> void:
-	if not level_data.has("goal") or not level_data["goal"].has("objects"):
-		return
-	var goal_objs: Dictionary = level_data["goal"]["objects"]
-	for key in goal_objs:
-		var parts = key.split(",")
-		if parts.size() != 2:
-			continue
-		var gx := int(parts[0])
-		var gy := int(parts[1])
-		var required: Dictionary = goal_objs[key]
-		for obj_name in required:
-			var needed := int(required[obj_name])
-			var have  := 0
-			if object_data.has(key) and object_data[key].has(obj_name):
-				have = int(object_data[key][obj_name])
-			for i in range(needed):
-				_spawn_goal_marker(obj_name, gx, gy, i < have)
-			
-			_add_goal_count_label(gx, gy, have, needed)
+	_track_cell_node(sprite, _cell_key(gx, gy))
 
 
 ## Spawns a single outlined diamond at a goal cell.
 ## satisfied = the matching object has already been placed here.
 func _spawn_goal_marker(object_name: String, gx: int, gy: int, satisfied: bool) -> void:
 	var sprite := Sprite2D.new()
-	var tex := load("res://assets/objects/" + object_name + "_goal.png") as Texture2D
+	var tex: Texture2D
+	if _goal_textures.has(object_name):
+		tex = _goal_textures[object_name]
+	else:
+		tex = load("res://assets/objects/" + object_name + "_goal.png") as Texture2D
+		_goal_textures[object_name] = tex
 	if tex != null:
 		sprite.texture = tex
 		sprite.scale = Vector2.ONE * _object_sprite_scale(tex)
@@ -965,7 +1039,9 @@ func _spawn_goal_marker(object_name: String, gx: int, gy: int, satisfied: bool) 
 	var grid_pos = object_grid_position(gx, gy + 1)
 	sprite.position = Vector2i(int(grid_pos[0] + offset_x), int(grid_pos[1] + offset_y))
 	sprite.z_index = 0
+	sprite.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(sprite)
+	_track_cell_node(sprite, _cell_key(gx, gy))
 
 
 ## Adds a count label to a regular object tile.
@@ -981,7 +1057,9 @@ func _add_object_count_label(gx: int, gy: int, tile_objects: Dictionary) -> void
 
 	var text := "?" if is_mixed else str(total)
 	var label := _make_count_label(text, center + Vector2(18, 28), Color(0.0, 0.0, 0.0, 1.0))
+	label.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(label)
+	_track_cell_node(label, _cell_key(gx, gy))
 
 
 ## Adds have/needed labels to a goal marker tile.
@@ -992,8 +1070,12 @@ func _add_goal_count_label(gx: int, gy: int, have: int, needed: int) -> void:
 
 	var have_label := _make_count_label(str(have), center + Vector2(-72, 28), Color(0.0, 0.0, 0.0, 1.0))
 	var needed_label := _make_count_label(str(needed), center + Vector2(18, 28), Color(0.046, 0.649, 0.924, 1.0))
+	have_label.set_meta("cell_key", _cell_key(gx, gy))
+	needed_label.set_meta("cell_key", _cell_key(gx, gy))
 	objects_node.add_child(have_label)
 	objects_node.add_child(needed_label)
+	_track_cell_node(have_label, _cell_key(gx, gy))
+	_track_cell_node(needed_label, _cell_key(gx, gy))
 
 
 ## Creates a styled Label at world_pos with the given text and colour.
@@ -1002,9 +1084,10 @@ func _make_count_label(text: String, world_pos: Vector2, color: Color) -> Label:
 	label.text = text
 	label.position = world_pos
 
-	var font = load(LABEL_FONT_PATH)
-	if font:
-		label.add_theme_font_override("font", font)
+	if _count_font == null:
+		_count_font = load(LABEL_FONT_PATH)
+	if _count_font:
+		label.add_theme_font_override("font", _count_font)
 
 	label.add_theme_font_size_override("font_size", 100)
 	label.add_theme_color_override("font_color", color)
@@ -1049,7 +1132,7 @@ func remove_object_at(gx: int, gy: int) -> String:
 		if tile_objects.is_empty():
 			object_data.erase(key)
 
-		_build_objects()
+		_refresh_cell_objects(key)
 		return object_name
 
 	return ""
@@ -1067,7 +1150,7 @@ func place_object_at(gx: int, gy: int, object_name: String) -> void:
 		object_data[key][object_name] = 0
 
 	object_data[key][object_name] += 1
-	_build_objects()
+	_refresh_cell_objects(key)
 
 
 func tile_has_any_object(gx: int, gy: int) -> bool:

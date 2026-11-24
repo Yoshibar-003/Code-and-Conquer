@@ -44,5 +44,17 @@ func run_tests() -> void:
 	check(pipe_python.contains("CodeAndConquer-test"), "Windows Python bootstrap should embed the pipe name")
 	check(pipe_python.contains("open("), "Windows Python bootstrap should open the pipe path")
 
+	for bootstrap in [unix_python, pipe_python]:
+		check(bootstrap.contains("len(_data) > 8000"), "Python bootstrap should cap oversized IPC messages in bytes")
+		check(bootstrap.contains("_robot_send('[PRINT] '"), "Python bootstrap should route print() through the capped sender")
+		check(bootstrap.contains("self._pending"), "Python bootstrap should buffer stdout until newline")
+		check(bootstrap.contains("sys._getframe(1).f_lineno"), "Python bootstrap should use fast caller line lookup")
+
+	var runner := commands.get_python_runner("print('done', end='')")
+	var flush_index := runner.find("_robot_stdout.flush()")
+	var done_index := runner.find("_robot_send('[DONE]')")
+	check(flush_index >= 0, "Python runner should flush buffered stdout")
+	check(done_index > flush_index, "Python runner should flush stdout before sending [DONE]")
+
 	print("PORTABILITY TESTS: %d failures" % failures)
 	quit(0 if failures == 0 else 1)

@@ -276,7 +276,7 @@ func _input(event: InputEvent) -> void:
 		grid.pan_by(event.relative)
 		get_viewport().set_input_as_handled()
 
-# Opens up file directory 
+# Opens up file directory
 func _on_save_button_pressed() -> void:
 	var level_name := level_name_input.text.strip_edges()
 	if level_name.is_empty():
@@ -297,7 +297,7 @@ func _on_save_button_pressed() -> void:
 	dialog.file_selected.connect(_save_level_to_path.bind(dialog))
 	dialog.canceled.connect(dialog.queue_free)
 	dialog.popup_centered_ratio(0.75)
-	
+
 # Separate function to actually save the file
 func _save_level_to_path(path: String, dialog: FileDialog) -> void:
 	dialog.queue_free()
