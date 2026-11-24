@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://jpip8jrt1kt3"
-path="res://.godot/imported/OldBackgoundWithLogo.png-14e4a5d6950b1f3fbf444a991e3f75ae.ctex"
+uid="uid://dgypb0gcnrmv1"
+path="res://.godot/imported/OldBackgroundWithLogo.png-2ec109d8dd20fd126f40bf33fe311c0e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/images/OldBackgoundWithLogo.png"
-dest_files=["res://.godot/imported/OldBackgoundWithLogo.png-14e4a5d6950b1f3fbf444a991e3f75ae.ctex"]
+source_file="res://assets/images/OldBackgroundWithLogo.png"
+dest_files=["res://.godot/imported/OldBackgroundWithLogo.png-2ec109d8dd20fd126f40bf33fe311c0e.ctex"]
 
 [params]
 
