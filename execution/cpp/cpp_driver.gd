@@ -15,6 +15,7 @@ var _compiler_pid := -1
 static var _compiler: String = ""
 static var _compiler_probed := false
 static var _compiler_version_output: Array = []
+var _tmp_seq := 0
 
 
 func _get_exe_path() -> String:
@@ -297,7 +298,14 @@ func compile_program() -> Dictionary:
 			DirAccess.remove_absolute(runtime_object)
 	if not runtime_reused:
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(RUNTIME_CACHE_DIR))
-		var runtime_tmp := shared_runtime_object + ".tmp"
+		# Unique per compile by construction: PID + instance id distinguish
+		# concurrent workers/instances, the instance counter repeated compiles
+		# on this driver. A shared static or timestamp could still collide.
+		# Note: tmp files can still leak on a hard crash mid-compile.
+		_tmp_seq += 1
+		var runtime_tmp := "%s.tmp.%d.%d.%d" % [
+			shared_runtime_object, OS.get_process_id(), get_instance_id(), _tmp_seq
+		]
 		var runtime_args := args.duplicate()
 		runtime_args.append_array(["-c", robot_cpp, "-o", runtime_tmp])
 		var runtime_code := _run_cancellable(compiler, runtime_args, output)
@@ -322,32 +330,29 @@ func compile_program() -> Dictionary:
 				"reason": "internal_error",
 				"exe_path": ""
 			}
-		if FileAccess.file_exists(shared_runtime_object):
-			DirAccess.remove_absolute(shared_runtime_object)
-		if DirAccess.rename_absolute(runtime_tmp, shared_runtime_object) != OK:
-			DirAccess.remove_absolute(runtime_tmp)
-			return {
-				"ok": false,
-				"output": "Compiled robot runtime could not be cached.",
-				"reason": "internal_error",
-				"exe_path": ""
-			}
-		if not _write_file(shared_runtime_hash_path, runtime_object_hash):
-			return {
-				"ok": false,
-				"output": "Compiled robot runtime could not be cached.",
-				"reason": "internal_error",
-				"exe_path": ""
-			}
+		# Materialize into this build dir from our own tmp file: the shared
+		# cache path can be removed/replaced by a concurrent publisher at any
+		# time, so compile success must not depend on it.
 		if FileAccess.file_exists(runtime_object):
 			DirAccess.remove_absolute(runtime_object)
-		if DirAccess.copy_absolute(shared_runtime_object, runtime_object) != OK:
+		if DirAccess.copy_absolute(runtime_tmp, runtime_object) != OK:
+			DirAccess.remove_absolute(runtime_tmp)
 			return {
 				"ok": false,
 				"output": "Compiled robot runtime could not be copied into the build directory.",
 				"reason": "internal_error",
 				"exe_path": ""
 			}
+		# Best-effort publish to the shared cache. A concurrent compile of the
+		# same runtime_key may win the rename; that's fine as the .sha256
+		# validity check treats a mismatched pair as a cache miss. Only a
+		# failed rename leaves our tmp behind, which we clean up.
+		if FileAccess.file_exists(shared_runtime_object):
+			DirAccess.remove_absolute(shared_runtime_object)
+		if DirAccess.rename_absolute(runtime_tmp, shared_runtime_object) == OK:
+			_write_file(shared_runtime_hash_path, runtime_object_hash)
+		else:
+			DirAccess.remove_absolute(runtime_tmp)
 		cache.set_value("runtime", "key", runtime_key)
 		cache.set_value("runtime", "object_hash", runtime_object_hash)
 		cache.save(cache_path)

@@ -53,6 +53,7 @@ var show_command_trail := true
 # when something actually changed instead of queue_redraw() every frame.
 var _dirty := true
 var _last_objects_version := -1
+var _last_level_version := -1
 
 # Static draw data, parsed once per level in setup() so _draw never splits
 # "x,y" keys or re-scans level_data. Object entries refresh on objects_version.
@@ -91,6 +92,8 @@ func setup(map_instance: Node, player: Node) -> void:
 	_trail_facing = ""
 	_dirty = true
 	_last_objects_version = -1
+	var level_version = _map_ref.get("level_version")
+	_last_level_version = int(level_version) if level_version != null else -1
 	_build_static_caches()
 	_rebuild_object_entries()
 	if player != null:
@@ -292,9 +295,18 @@ func _process(_delta: float) -> void:
 			_record_trail(gx, gy, facing)
 			_dirty = true
 	if _map_ref != null:
+		# level_version bumps when map_view rebuilds its level lookups
+		# (invalidate_lookups after mutating walls/goal/void tiles). Our static
+		# caches snapshot that same level_data, so rebuild them too.
+		var level_version = _map_ref.get("level_version")
+		if level_version != null and int(level_version) != _last_level_version:
+			_last_level_version = int(level_version)
+			_build_static_caches()
+			_rebuild_object_entries()
+			_dirty = true
 		var version = _map_ref.get("objects_version")
-		if version != _last_objects_version:
-			_last_objects_version = version
+		if version != null and int(version) != _last_objects_version:
+			_last_objects_version = int(version)
 			_rebuild_object_entries()
 			_dirty = true
 	if _dirty and visible:

@@ -40,6 +40,10 @@ var backdrop: Node2D
 # Bumped every time objects are rebuilt so views (e.g., flat_grid_view) know
 # when object_data changed and a redraw is needed.
 var objects_version := 0
+# Bumped every time level lookups are rebuilt (build_level, invalidate_lookups)
+# so views that cache level_data (e.g., flat_grid_view static caches) know to
+# re-parse walls/goal/void tiles.
+var level_version := 0
 # Precomputed per-level lookups, rebuilt in build_level(). Keys are Vector2i
 # grid coords so hot queries avoid string formatting.
 var _goal_cells := {}   # Vector2i -> true
@@ -314,6 +318,8 @@ func _rebuild_lookups(data: Dictionary) -> void:
 				var pos = goal["position"]
 				if typeof(pos) == TYPE_DICTIONARY:
 					_goal_cells[Vector2i(int(pos.get("x", -1)), int(pos.get("y", -1)))] = true
+
+	level_version += 1
 
 
 # ====== World Rendering Functions ======

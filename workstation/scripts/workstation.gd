@@ -112,6 +112,7 @@ var _subprocess_pid: int = -1
 var _sandbox_run_id: String = ""
 var _sandbox_cleanup_token: String = ""
 var _sandbox_cleanup_epoch: int = 0  # bumped on new credentials and each cleanup; stale cleanups abort
+var _sandbox_deleted_run_keys: Dictionary = {}
 var _ipc_active: bool = false
 var _ipc_loop_running: bool = false
 var _run_pending: bool = false
@@ -227,6 +228,9 @@ func _ready() -> void:
 	run_button.pressed.connect(_on_run_button_pressed)
 	check_button.pressed.connect(_on_check_button_pressed)
 	editor.text_changed.connect(_on_editor_text_changed)
+	# Programmatic `editor.text = ...` (template/level loads) emits text_set,
+	# not text_changed — both must clear the tracked line highlight.
+	editor.text_set.connect(_on_editor_text_changed)
 	run_button.disabled = true
 	step_button.pressed.connect(_on_step_button_pressed)
 	prev_button.pressed.connect(_on_prev_button_pressed)
@@ -1460,12 +1464,14 @@ func _cleanup_sandbox_run() -> void:
 	var epoch := _sandbox_cleanup_epoch
 	var run_id := _sandbox_run_id
 	var token := _sandbox_cleanup_token
+	var deleted_key := run_id + ":" + token
 	var cleanup: Dictionary = {}
 
 	for attempt in range(5):
 		cleanup = sandbox_worker.delete_run_directory(run_id, token)
 
 		if cleanup.ok:
+			_sandbox_deleted_run_keys[deleted_key] = true
 			# Only clear the members if a newer run hasn't claimed them.
 			if _sandbox_run_id == run_id and _sandbox_cleanup_token == token:
 				_sandbox_run_id = ""
@@ -1479,6 +1485,19 @@ func _cleanup_sandbox_run() -> void:
 
 		# A new run (or another cleanup) superseded this one while we slept.
 		if _sandbox_cleanup_epoch != epoch:
+			# Only skip when this exact folder was already deleted or the same
+			# credentials are still owned by another cleanup. Empty members count
+			# as changed: a newer run may have finished and cleared them.
+			var credentials_changed := _sandbox_run_id != run_id or _sandbox_cleanup_token != token
+			if not _sandbox_deleted_run_keys.has(deleted_key) and credentials_changed:
+				var stale_cleanup := sandbox_worker.delete_run_directory(run_id, token)
+				if stale_cleanup.ok:
+					_sandbox_deleted_run_keys[deleted_key] = true
+				else:
+					log_warning(
+						"Could not remove superseded run folder: "
+						+ stale_cleanup.message
+					)
 			return
 
 	log_warning(
