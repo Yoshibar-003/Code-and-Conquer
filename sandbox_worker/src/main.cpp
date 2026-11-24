@@ -786,41 +786,6 @@ int main(int argc, char* argv[]) {
         } catch (const std::exception& error) { std::cerr << error.what() << std::endl; return 1; }
     }
 
-    if (argc == 4 && std::string(argv[1]) == "--launch-cpp") {
-    try {
-        const std::string run_id = argv[2];
-        const std::string token = argv[3];
-
-        const fs::path run_directory = run_directory_for(run_id);
-
-        if (!token_matches(run_directory, token)) {
-            throw std::runtime_error("Run directory is not owned by this request.");
-        }
-
-        const fs::path executable = run_directory / "student_program.exe";
-
-        if (!fs::is_regular_file(executable)) {
-            throw std::runtime_error("Student executable was not found in the run directory.");
-        }
-
-        const DWORD pid = launch_cpp_in_appcontainer(
-            executable,
-            run_directory
-        );
-
-        std::cout
-            << R"({"type":"started","pid":)"
-            << pid
-            << "}"
-            << std::endl;
-
-        return 0;
-    } catch (const std::exception& error) {
-        std::cerr << error.what() << std::endl;
-        return 1;
-        }
-    }
-
 
     if (argc == 6 && (std::string(argv[1]) == "--run-cpp" || std::string(argv[1]) == "--run-python")) {
     try {
@@ -1031,6 +996,6 @@ int main(int argc, char* argv[]) {
     }
 }
  
-    std::cerr << "Usage: sandbox_runner --ping | --prepare-run <run-id> <token> | --prepare-python-run <run-id> <token> <runtime-source> | --delete-run-dir <run-id> <token> | --launch-cpp <run-id> <token> | --run-cpp <run-id> <token> <godot-port> <ipc-token>" << std::endl;
+    std::cerr << "Usage: sandbox_runner --ping | --prepare-run <run-id> <token> | --prepare-python-run <run-id> <token> <runtime-source> | --delete-run-dir <run-id> <token> | --run-cpp <run-id> <token> <godot-port> <ipc-token>" << std::endl;
     return 1;
 }
